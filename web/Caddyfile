@@ -1,0 +1,11 @@
+qm.upcshare.cn {
+	encode gzip zstd
+
+	@api path /api/* /s/*
+	reverse_proxy @api app:8080
+
+	root * /srv
+	try_files {path} /index.html
+	file_server
+}
+

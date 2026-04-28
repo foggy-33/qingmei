@@ -1,0 +1,15 @@
+spring:
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+  servlet:
+    multipart:
+      max-file-size: 2GB
+      max-request-size: 2GB
+
+app:
+  storage-dir: ${STORAGE_DIR:./storage}
+  share-base-url: ${SHARE_BASE_URL:http://localhost:8080}
+  cache-ttl-seconds: ${CACHE_TTL_SECONDS:300}
+  share-default-hours: ${SHARE_DEFAULT_HOURS:72}
+  auth-session-hours: ${AUTH_SESSION_HOURS:72}
+  http-addr: ${HTTP_ADDR::8080}
