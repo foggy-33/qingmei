@@ -1,5 +1,4 @@
-qm.upcshare.cn {
-	tls /certs/fullchain.pem /certs/privkey.pem
+:80 {
 	encode gzip zstd
 
 	handle /api* {
