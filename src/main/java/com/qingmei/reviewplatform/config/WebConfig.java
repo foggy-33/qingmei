@@ -23,7 +23,12 @@ public class WebConfig {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/**")
-                        .allowedOrigins("http://localhost:5173", "http://127.0.0.1:5173")
+                        .allowedOrigins(
+                                "http://localhost:5173",
+                                "http://127.0.0.1:5173",
+                                "https://qm.upcshare.cn",
+                                "https://qm.upcshare.cn:8088"
+                        )
                         .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
                         .allowedHeaders("Origin", "Content-Type", "Authorization")
                         .allowCredentials(true)
