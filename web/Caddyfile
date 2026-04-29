@@ -1,11 +1,18 @@
 qm.upcshare.cn {
+	tls /certs/fullchain.pem /certs/privkey.pem
 	encode gzip zstd
 
-	@api path /api/* /s/*
-	reverse_proxy @api app:8080
+	handle /api* {
+		reverse_proxy app:8080
+	}
 
-	root * /srv
-	try_files {path} /index.html
-	file_server
+	handle /s* {
+		reverse_proxy app:8080
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
 }
-

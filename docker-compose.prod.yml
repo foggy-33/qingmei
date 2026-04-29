@@ -31,7 +31,7 @@ services:
       REDIS_ADDR: "redis:6379"
       REDIS_DB: "0"
       STORAGE_DIR: "/app/storage"
-      SHARE_BASE_URL: "https://qm.upcshare.cn"
+      SHARE_BASE_URL: "https://qm.upcshare.cn:8088"
       CACHE_TTL_SECONDS: "300"
       SHARE_DEFAULT_HOURS: "72"
       AUTH_SESSION_HOURS: "72"
@@ -42,15 +42,15 @@ services:
     build:
       context: ./web
       args:
-        VITE_API_BASE: "https://qm.upcshare.cn"
+        VITE_API_BASE: "https://qm.upcshare.cn:8088"
     container_name: qingmei-web
     restart: unless-stopped
     depends_on:
       - app
     ports:
-      - "80:80"
-      - "443:443"
+      - "8088:443"
     volumes:
+      - ./certs:/certs:ro
       - caddy_data:/data
       - caddy_config:/config
 
@@ -60,4 +60,3 @@ volumes:
   storage:
   caddy_data:
   caddy_config:
-
