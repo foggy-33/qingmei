@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
+  campusShareBase,
   clearAuthToken,
   createShare,
   deleteAsset,
@@ -10,6 +11,7 @@ import {
   listAssets,
   loginUser,
   logoutUser,
+  publicShareBase,
   registerUser,
   shareStreamUrl,
   streamUrl,
@@ -85,6 +87,33 @@ function routeShareToken() {
   return new URLSearchParams(window.location.search).get("share") || "";
 }
 
+function routeCampusBase() {
+  return new URLSearchParams(window.location.search).get("campus") || "";
+}
+
+async function maybeRedirectToCampusShare() {
+  const token = routeShareToken();
+  const campusBase = (routeCampusBase() || campusShareBase()).replace(/\/$/, "");
+  if (!token || !campusBase || window.location.origin === campusBase) return false;
+
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 1200);
+  try {
+    const res = await fetch(`${campusBase}/api/v1/public/shares/${encodeURIComponent(token)}`, {
+      method: "GET",
+      signal: controller.signal
+    });
+    if (!res.ok) return false;
+    const target = `${campusBase}${window.location.pathname}?share=${encodeURIComponent(token)}`;
+    window.location.replace(target);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 function switchAuthMode(mode) {
   authMode.value = mode;
   authError.value = "";
@@ -116,6 +145,7 @@ async function submitAuth() {
 
 async function bootstrapAuth() {
   authReady.value = false;
+  if (await maybeRedirectToCampusShare()) return;
   if (!hasAuthToken()) {
     currentUser.value = null;
     authReady.value = true;
@@ -360,7 +390,13 @@ const selectedAssetsForBatch = computed(() =>
 
 const shareItems = computed(() =>
   Object.entries(savedShares.value)
-    .map(([assetId, item]) => ({ assetId, ...item }))
+    .map(([assetId, item]) => ({
+      assetId,
+      ...item,
+      campusLink: item.campusLink || item.link,
+      publicLink: item.smartLink || item.publicLink || item.link,
+      smartLink: item.smartLink || item.publicLink || item.link
+    }))
     .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
 );
 
@@ -476,7 +512,7 @@ async function batchShare() {
   const links = [];
   for (const a of selectedAssetsForBatch.value) {
     const data = await createShare(a.id, expiryHours.value, annotationMap.value[a.id] || []);
-    const link = toReviewShareLink(data.share_link);
+    const link = toReviewShareLink(data.share_link, "campus");
     shareLinks.value = { ...shareLinks.value, [a.id]: link };
     links.push(`${a.original_name}: ${link}`);
   }
@@ -484,17 +520,38 @@ async function batchShare() {
   status.value = "分享链接已复制";
 }
 
-async function shareAsset(id) {
+function shareBase(channel = "campus") {
+  return channel === "public" ? publicShareBase() : window.location.origin;
+}
+
+function smartShareBase() {
+  const origin = window.location.origin;
+  return origin === campusShareBase() ? origin : campusShareBase();
+}
+
+function makeShareLinks(rawLink) {
+  return {
+    campusLink: toReviewShareLink(rawLink, "campus"),
+    publicLink: toReviewShareLink(rawLink, "public"),
+    smartLink: toReviewShareLink(rawLink, "smart")
+  };
+}
+
+async function shareAsset(id, channel = "smart") {
   const asset = assets.value.find((a) => a.id === id);
   if (!asset) return;
   const data = await createShare(id, expiryHours.value, annotationMap.value[id] || []);
-  const link = toReviewShareLink(data.share_link);
+  const links = makeShareLinks(data.share_link);
+  const link = channel === "campus" ? links.campusLink : links.smartLink;
   shareLinks.value = { ...shareLinks.value, [id]: link };
   savedShares.value = {
     ...savedShares.value,
     [id]: {
       name: assetAlias.value[id] || asset.original_name,
       link,
+      campusLink: links.campusLink,
+      publicLink: links.smartLink,
+      smartLink: links.smartLink,
       createdAt: now()
     }
   };
@@ -508,28 +565,37 @@ async function copyShareLink(link) {
   status.value = "分享链接已复制";
 }
 
-function toReviewShareLink(rawLink) {
+function toReviewShareLink(rawLink, channel = "campus") {
   const token = String(rawLink || "").split("/s/").pop();
   if (!token || token === rawLink) return rawLink;
-  return `${window.location.origin}${window.location.pathname}?share=${encodeURIComponent(token)}`;
+  if (channel === "smart") {
+    return `${publicShareBase()}${window.location.pathname}?share=${encodeURIComponent(token)}&campus=${encodeURIComponent(smartShareBase())}`;
+  }
+  return `${shareBase(channel)}${window.location.pathname}?share=${encodeURIComponent(token)}`;
 }
 
-async function onCreateShareInDetail() {
+async function onCreateShareInDetail(channel = "smart") {
   if (!selectedAsset.value) return;
   if (shareMode.value) {
-    const link = `${window.location.origin}${window.location.pathname}?share=${encodeURIComponent(shareToken.value)}`;
+    const link = channel === "smart"
+      ? `${publicShareBase()}${window.location.pathname}?share=${encodeURIComponent(shareToken.value)}&campus=${encodeURIComponent(smartShareBase())}`
+      : `${shareBase(channel)}${window.location.pathname}?share=${encodeURIComponent(shareToken.value)}`;
     await navigator.clipboard.writeText(link);
     status.value = "批注页面分享链接已复制";
     return;
   }
   const data = await createShare(selectedAsset.value.id, expiryHours.value, selectedAnnotations.value);
-  const link = toReviewShareLink(data.share_link);
+  const links = makeShareLinks(data.share_link);
+  const link = channel === "campus" ? links.campusLink : links.smartLink;
   shareLinks.value = { ...shareLinks.value, [selectedAsset.value.id]: link };
   savedShares.value = {
     ...savedShares.value,
     [selectedAsset.value.id]: {
       name: assetAlias.value[selectedAsset.value.id] || selectedAsset.value.original_name,
       link,
+      campusLink: links.campusLink,
+      publicLink: links.smartLink,
+      smartLink: links.smartLink,
       createdAt: now()
     }
   };
@@ -691,7 +757,9 @@ async function handleContextAction(action) {
   if (type === "asset") {
     const id = key.slice(2);
     if (action === "open") openAsset(id);
-    if (action === "share") await shareAsset(id);
+    if (action === "share") await shareAsset(id, "smart");
+    if (action === "share-campus") await shareAsset(id, "campus");
+    if (action === "share-public") await shareAsset(id, "public");
     if (action === "rename") renameAsset(id);
     if (action === "delete") await removeAsset(id);
   }
@@ -840,9 +908,13 @@ onBeforeUnmount(() => {
                   <div>
                     <strong>{{ item.name }}</strong>
                     <p>{{ formatDate(item.createdAt) }}</p>
-                    <a :href="item.link" target="_blank" rel="noreferrer">{{ item.link }}</a>
+                    <a :href="item.campusLink" target="_blank" rel="noreferrer">Campus: {{ item.campusLink }}</a>
+                    <a :href="item.smartLink" target="_blank" rel="noreferrer">Smart: {{ item.smartLink }}</a>
                   </div>
-                  <button class="btn primary" @click="copyShareLink(item.link)">复制</button>
+                  <div class="share-actions">
+                    <button class="btn" @click="copyShareLink(item.campusLink)">复制校园网</button>
+                    <button class="btn primary" @click="copyShareLink(item.smartLink)">复制智能链接</button>
+                  </div>
                 </article>
               </div>
             </template>
@@ -917,7 +989,7 @@ onBeforeUnmount(() => {
 
         <template v-if="menu.type === 'asset'">
           <button @click="handleContextAction('open')">打开批注页</button>
-          <button @click="handleContextAction('share')">分享</button>
+          <button @click="handleContextAction('share')">分享智能链接</button>
           <button @click="handleContextAction('rename')">重命名</button>
           <button class="danger" @click="handleContextAction('delete')">删除</button>
         </template>
@@ -1400,8 +1472,16 @@ h1 {
 }
 
 .share-card a {
+  display: block;
   color: #2563eb;
   word-break: break-all;
+  margin-top: 4px;
+}
+
+.share-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .detail {
