@@ -84,28 +84,39 @@ function userStorageKey(base) {
 }
 
 function routeShareToken() {
-  return new URLSearchParams(window.location.search).get("share") || "";
+  const params = new URLSearchParams(window.location.search);
+  return params.get("s") || params.get("share") || "";
 }
 
 function routeCampusBase() {
-  return new URLSearchParams(window.location.search).get("campus") || "";
+  const params = new URLSearchParams(window.location.search);
+  return params.get("c") || params.get("campus") || "";
 }
 
-async function maybeRedirectToCampusShare() {
+function campusRedirectTarget(campusBase) {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("campus");
+  url.searchParams.delete("c");
+  return `${campusBase}${url.pathname}${url.search}${url.hash}`;
+}
+
+async function maybeRedirectToCampus() {
   const token = routeShareToken();
   const campusBase = (routeCampusBase() || campusShareBase()).replace(/\/$/, "");
-  if (!token || !campusBase || window.location.origin === campusBase) return false;
+  if (!campusBase || window.location.origin === campusBase) return false;
 
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), 1200);
   try {
-    const res = await fetch(`${campusBase}/api/v1/public/shares/${encodeURIComponent(token)}`, {
+    const probePath = token
+      ? `/api/v1/public/shares/${encodeURIComponent(token)}`
+      : "/api/v1/public/ping";
+    const res = await fetch(`${campusBase}${probePath}`, {
       method: "GET",
       signal: controller.signal
     });
     if (!res.ok) return false;
-    const target = `${campusBase}${window.location.pathname}?share=${encodeURIComponent(token)}`;
-    window.location.replace(target);
+    window.location.replace(campusRedirectTarget(campusBase));
     return true;
   } catch {
     return false;
@@ -145,7 +156,7 @@ async function submitAuth() {
 
 async function bootstrapAuth() {
   authReady.value = false;
-  if (await maybeRedirectToCampusShare()) return;
+  if (await maybeRedirectToCampus()) return;
   if (!hasAuthToken()) {
     currentUser.value = null;
     authReady.value = true;
@@ -393,11 +404,13 @@ const shareItems = computed(() =>
     .map(([assetId, item]) => ({
       assetId,
       ...item,
-      campusLink: item.campusLink || item.link,
-      publicLink: item.smartLink || item.publicLink || item.link,
-      smartLink: item.smartLink || item.publicLink || item.link
+      link: item.link || item.smartLink || item.publicLink || item.campusLink || ""
     }))
     .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+);
+
+const accessLabel = computed(() =>
+  window.location.origin === campusShareBase() ? "局域网访问" : "公网访问"
 );
 
 function formatDate(v) {
@@ -512,7 +525,7 @@ async function batchShare() {
   const links = [];
   for (const a of selectedAssetsForBatch.value) {
     const data = await createShare(a.id, expiryHours.value, annotationMap.value[a.id] || []);
-    const link = toReviewShareLink(data.share_link, "campus");
+    const link = toReviewShareLink(data.share_link);
     shareLinks.value = { ...shareLinks.value, [a.id]: link };
     links.push(`${a.original_name}: ${link}`);
   }
@@ -520,38 +533,17 @@ async function batchShare() {
   status.value = "分享链接已复制";
 }
 
-function shareBase(channel = "campus") {
-  return channel === "public" ? publicShareBase() : window.location.origin;
-}
-
-function smartShareBase() {
-  const origin = window.location.origin;
-  return origin === campusShareBase() ? origin : campusShareBase();
-}
-
-function makeShareLinks(rawLink) {
-  return {
-    campusLink: toReviewShareLink(rawLink, "campus"),
-    publicLink: toReviewShareLink(rawLink, "public"),
-    smartLink: toReviewShareLink(rawLink, "smart")
-  };
-}
-
-async function shareAsset(id, channel = "smart") {
+async function shareAsset(id) {
   const asset = assets.value.find((a) => a.id === id);
   if (!asset) return;
   const data = await createShare(id, expiryHours.value, annotationMap.value[id] || []);
-  const links = makeShareLinks(data.share_link);
-  const link = channel === "campus" ? links.campusLink : links.smartLink;
+  const link = toReviewShareLink(data.share_link);
   shareLinks.value = { ...shareLinks.value, [id]: link };
   savedShares.value = {
     ...savedShares.value,
     [id]: {
       name: assetAlias.value[id] || asset.original_name,
       link,
-      campusLink: links.campusLink,
-      publicLink: links.smartLink,
-      smartLink: links.smartLink,
       createdAt: now()
     }
   };
@@ -565,37 +557,28 @@ async function copyShareLink(link) {
   status.value = "分享链接已复制";
 }
 
-function toReviewShareLink(rawLink, channel = "campus") {
+function toReviewShareLink(rawLink) {
   const token = String(rawLink || "").split("/s/").pop();
   if (!token || token === rawLink) return rawLink;
-  if (channel === "smart") {
-    return `${publicShareBase()}${window.location.pathname}?share=${encodeURIComponent(token)}&campus=${encodeURIComponent(smartShareBase())}`;
-  }
-  return `${shareBase(channel)}${window.location.pathname}?share=${encodeURIComponent(token)}`;
+  return `${publicShareBase()}${window.location.pathname}?s=${encodeURIComponent(token)}`;
 }
 
-async function onCreateShareInDetail(channel = "smart") {
+async function onCreateShareInDetail() {
   if (!selectedAsset.value) return;
   if (shareMode.value) {
-    const link = channel === "smart"
-      ? `${publicShareBase()}${window.location.pathname}?share=${encodeURIComponent(shareToken.value)}&campus=${encodeURIComponent(smartShareBase())}`
-      : `${shareBase(channel)}${window.location.pathname}?share=${encodeURIComponent(shareToken.value)}`;
+    const link = `${publicShareBase()}${window.location.pathname}?s=${encodeURIComponent(shareToken.value)}`;
     await navigator.clipboard.writeText(link);
     status.value = "批注页面分享链接已复制";
     return;
   }
   const data = await createShare(selectedAsset.value.id, expiryHours.value, selectedAnnotations.value);
-  const links = makeShareLinks(data.share_link);
-  const link = channel === "campus" ? links.campusLink : links.smartLink;
+  const link = toReviewShareLink(data.share_link);
   shareLinks.value = { ...shareLinks.value, [selectedAsset.value.id]: link };
   savedShares.value = {
     ...savedShares.value,
     [selectedAsset.value.id]: {
       name: assetAlias.value[selectedAsset.value.id] || selectedAsset.value.original_name,
       link,
-      campusLink: links.campusLink,
-      publicLink: links.smartLink,
-      smartLink: links.smartLink,
       createdAt: now()
     }
   };
@@ -757,9 +740,7 @@ async function handleContextAction(action) {
   if (type === "asset") {
     const id = key.slice(2);
     if (action === "open") openAsset(id);
-    if (action === "share") await shareAsset(id, "smart");
-    if (action === "share-campus") await shareAsset(id, "campus");
-    if (action === "share-public") await shareAsset(id, "public");
+    if (action === "share") await shareAsset(id);
     if (action === "rename") renameAsset(id);
     if (action === "delete") await removeAsset(id);
   }
@@ -845,6 +826,7 @@ onBeforeUnmount(() => {
           <h1>{{ view === "home" ? "素材库" : "批注页面" }}</h1>
         </div>
         <div class="top-actions">
+          <span class="access-badge">{{ accessLabel }}</span>
           <input ref="fileInput" type="file" class="hidden" @change="onPickFile" />
           <div v-if="uploadProgress.visible" class="upload-toast">
             <strong>{{ uploadProgress.percent }}%</strong>
@@ -908,12 +890,10 @@ onBeforeUnmount(() => {
                   <div>
                     <strong>{{ item.name }}</strong>
                     <p>{{ formatDate(item.createdAt) }}</p>
-                    <a :href="item.campusLink" target="_blank" rel="noreferrer">Campus: {{ item.campusLink }}</a>
-                    <a :href="item.smartLink" target="_blank" rel="noreferrer">Smart: {{ item.smartLink }}</a>
+                    <a :href="item.link" target="_blank" rel="noreferrer">{{ item.link }}</a>
                   </div>
                   <div class="share-actions">
-                    <button class="btn" @click="copyShareLink(item.campusLink)">复制校园网</button>
-                    <button class="btn primary" @click="copyShareLink(item.smartLink)">复制智能链接</button>
+                    <button class="btn primary" @click="copyShareLink(item.link)">复制链接</button>
                   </div>
                 </article>
               </div>
@@ -1223,6 +1203,16 @@ h1 {
 .top-actions {
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.access-badge {
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #475569;
+  padding: 7px 11px;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .upload-toast {

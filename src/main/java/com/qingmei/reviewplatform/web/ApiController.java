@@ -217,6 +217,11 @@ public class ApiController {
         }
     }
 
+    @GetMapping("/api/v1/public/ping")
+    public ResponseEntity<Map<String, Object>> ping() {
+        return ResponseEntity.ok(Map.of("ok", true));
+    }
+
     @PutMapping("/api/v1/shares/{token}/annotations")
     public ResponseEntity<Map<String, Object>> updateShareAnnotations(HttpServletRequest request,
                                                                        @PathVariable String token,
