@@ -1,5 +1,5 @@
 const API_BASE = (import.meta.env.VITE_API_BASE || window.location.origin).replace(/\/$/, "");
-const CAMPUS_SHARE_BASE = (import.meta.env.VITE_CAMPUS_SHARE_BASE || "https://qm.upcshare.cn:8088").replace(/\/$/, "");
+const CAMPUS_SHARE_BASE = (import.meta.env.VITE_CAMPUS_SHARE_BASE || "https://campus-qm.upcshare.cn:8088").replace(/\/$/, "");
 const PUBLIC_SHARE_BASE = (import.meta.env.VITE_PUBLIC_SHARE_BASE || "https://qm.upcshare.cn:8443").replace(/\/$/, "");
 const AUTH_TOKEN_KEY = "qm_auth_token_v1";
 

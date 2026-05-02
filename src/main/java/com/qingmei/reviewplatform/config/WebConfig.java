@@ -27,6 +27,7 @@ public class WebConfig {
                                 "http://localhost:5173",
                                 "http://127.0.0.1:5173",
                                 "https://qm.upcshare.cn",
+                                "https://campus-qm.upcshare.cn:8088",
                                 "https://qm.upcshare.cn:8088",
                                 "https://qm.upcshare.cn:8443"
                         )

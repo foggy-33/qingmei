@@ -1,4 +1,4 @@
-qm.upcshare.cn {
+qm.upcshare.cn, campus-qm.upcshare.cn {
 	tls /certs/fullchain.pem /certs/privkey.pem
 	encode gzip zstd
 

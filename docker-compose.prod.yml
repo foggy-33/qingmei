@@ -31,7 +31,7 @@ services:
       REDIS_ADDR: "redis:6379"
       REDIS_DB: "0"
       STORAGE_DIR: "/app/storage"
-      SHARE_BASE_URL: "https://qm.upcshare.cn:8088"
+      SHARE_BASE_URL: "https://campus-qm.upcshare.cn:8088"
       CACHE_TTL_SECONDS: "300"
       SHARE_DEFAULT_HOURS: "72"
       AUTH_SESSION_HOURS: "72"
@@ -43,7 +43,7 @@ services:
       context: ./web
       args:
         VITE_API_BASE: ""
-        VITE_CAMPUS_SHARE_BASE: "https://qm.upcshare.cn:8088"
+        VITE_CAMPUS_SHARE_BASE: "https://campus-qm.upcshare.cn:8088"
         VITE_PUBLIC_SHARE_BASE: "https://qm.upcshare.cn:8443"
     container_name: qingmei-web
     restart: unless-stopped
