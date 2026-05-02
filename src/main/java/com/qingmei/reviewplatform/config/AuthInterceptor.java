@@ -40,6 +40,10 @@ public class AuthInterceptor implements HandlerInterceptor {
             unauthorized(response);
             return false;
         }
+        if (authService.isBanned(username)) {
+            forbidden(response, "account banned");
+            return false;
+        }
         request.setAttribute("authUsername", username);
 
         return true;
@@ -50,5 +54,12 @@ public class AuthInterceptor implements HandlerInterceptor {
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.getWriter().write("{\"error\":\"unauthorized\"}");
+    }
+
+    private void forbidden(HttpServletResponse response, String message) throws IOException {
+        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.getWriter().write("{\"error\":\"" + message + "\"}");
     }
 }

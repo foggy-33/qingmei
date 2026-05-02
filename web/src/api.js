@@ -62,12 +62,15 @@ export async function listAssets(limit = 24, offset = 0) {
   return req(`/api/v1/assets?${qs({ limit, offset })}`);
 }
 
-export async function uploadAsset(file, onProgress) {
+export async function uploadAsset(file, onProgress, onReady) {
   const form = new FormData();
   form.append("file", file);
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    if (typeof onReady === "function") {
+      onReady(() => xhr.abort());
+    }
     xhr.open("POST", `${API_BASE}/api/v1/assets/upload`);
     const token = getAuthToken();
     if (token) {
@@ -97,6 +100,7 @@ export async function uploadAsset(file, onProgress) {
       }
     };
     xhr.onerror = () => reject(new Error("上传失败"));
+    xhr.onabort = () => reject(new Error("上传已取消"));
     xhr.send(form);
   });
 }
@@ -138,6 +142,26 @@ export async function getAdminOverview() {
   return req("/api/v1/admin/overview");
 }
 
+export async function setAdminUser(username, value) {
+  return req(`/api/v1/admin/users/${encodeURIComponent(username)}/admin`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ value })
+  });
+}
+
+export async function setBannedUser(username, value) {
+  return req(`/api/v1/admin/users/${encodeURIComponent(username)}/banned`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ value })
+  });
+}
+
 export async function registerUser(username, password) {
   const data = await req("/api/v1/auth/register", {
     method: "POST",
@@ -177,6 +201,11 @@ export async function logoutUser() {
 export function streamUrl(assetId) {
   const token = encodeURIComponent(getAuthToken());
   return `${API_BASE}/api/v1/assets/${assetId}/stream?access_token=${token}`;
+}
+
+export function adminStreamUrl(assetId) {
+  const token = encodeURIComponent(getAuthToken());
+  return `${API_BASE}/api/v1/admin/assets/${assetId}/stream?access_token=${token}`;
 }
 
 export function downloadUrl(assetId) {

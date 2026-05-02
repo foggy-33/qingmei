@@ -4,6 +4,7 @@ import com.qingmei.reviewplatform.model.Asset;
 import com.qingmei.reviewplatform.model.ShareLink;
 import com.qingmei.reviewplatform.repository.NotFoundException;
 import com.qingmei.reviewplatform.service.AuthService;
+import com.qingmei.reviewplatform.service.BadRequestException;
 import com.qingmei.reviewplatform.service.ExpiredShareException;
 import com.qingmei.reviewplatform.service.ReviewService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -229,6 +230,59 @@ public class ApiController {
             return error(HttpStatus.FORBIDDEN, "admin only");
         }
         return ResponseEntity.ok(reviewService.adminOverview());
+    }
+
+    @GetMapping("/api/v1/admin/assets/{id}/stream")
+    public ResponseEntity<?> streamAdminAsset(HttpServletRequest request, @PathVariable String id) {
+        String username = currentUsername(request);
+        if (!authService.isAdmin(username)) {
+            return error(HttpStatus.FORBIDDEN, "admin only");
+        }
+        try {
+            Asset asset = reviewService.getAssetForAdmin(id);
+            return fileResponse(asset, false);
+        } catch (NotFoundException ex) {
+            return error(HttpStatus.NOT_FOUND, "asset not found");
+        } catch (Exception ex) {
+            log.error("admin stream asset failed, id={}", id, ex);
+            return error(HttpStatus.INTERNAL_SERVER_ERROR, "get asset failed");
+        }
+    }
+
+    @PutMapping("/api/v1/admin/users/{username}/admin")
+    public ResponseEntity<Map<String, Object>> setUserAdmin(HttpServletRequest request,
+                                                             @PathVariable String username,
+                                                             @RequestBody(required = false) AdminUserStatusRequest req) {
+        String current = currentUsername(request);
+        if (!authService.isAdmin(current)) {
+            return error(HttpStatus.FORBIDDEN, "admin only");
+        }
+        try {
+            authService.setUserAdmin(username, req != null && req.value());
+            return ResponseEntity.ok(reviewService.adminOverview());
+        } catch (BadRequestException ex) {
+            return error(HttpStatus.BAD_REQUEST, ex.getMessage());
+        } catch (NotFoundException ex) {
+            return error(HttpStatus.NOT_FOUND, "user not found");
+        }
+    }
+
+    @PutMapping("/api/v1/admin/users/{username}/banned")
+    public ResponseEntity<Map<String, Object>> setUserBanned(HttpServletRequest request,
+                                                              @PathVariable String username,
+                                                              @RequestBody(required = false) AdminUserStatusRequest req) {
+        String current = currentUsername(request);
+        if (!authService.isAdmin(current)) {
+            return error(HttpStatus.FORBIDDEN, "admin only");
+        }
+        try {
+            authService.setUserBanned(username, req != null && req.value());
+            return ResponseEntity.ok(reviewService.adminOverview());
+        } catch (BadRequestException ex) {
+            return error(HttpStatus.BAD_REQUEST, ex.getMessage());
+        } catch (NotFoundException ex) {
+            return error(HttpStatus.NOT_FOUND, "user not found");
+        }
     }
 
     @PutMapping("/api/v1/shares/{token}/annotations")

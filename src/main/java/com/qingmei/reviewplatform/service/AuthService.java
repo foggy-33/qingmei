@@ -11,7 +11,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.Locale;
 import java.util.UUID;
 
 @Service
@@ -34,7 +33,7 @@ public class AuthService {
         this.appProperties = appProperties;
     }
 
-    public record AuthUser(String id, String username, OffsetDateTime createdAt, boolean admin) {
+    public record AuthUser(String id, String username, OffsetDateTime createdAt, boolean admin, boolean banned) {
     }
 
     public record AuthResult(String token, AuthUser user) {
@@ -48,6 +47,8 @@ public class AuthService {
         user.setId(UUID.randomUUID().toString());
         user.setUsername(normalized);
         user.setPasswordHash(passwordEncoder.encode(password));
+        user.setAdmin(isRootAdmin(normalized));
+        user.setBanned(false);
         user.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC));
 
         try {
@@ -71,7 +72,7 @@ public class AuthService {
             throw new UnauthorizedException("用户名或密码错误");
         }
 
-        if (!passwordEncoder.matches(password, user.getPasswordHash())) {
+        if (!passwordEncoder.matches(password, user.getPasswordHash()) || user.isBanned()) {
             throw new UnauthorizedException("用户名或密码错误");
         }
 
@@ -86,6 +87,9 @@ public class AuthService {
         }
         try {
             UserAccount user = repository.getUserByUsername(username);
+            if (user.isBanned()) {
+                throw new UnauthorizedException("账号已被封禁");
+            }
             return toAuthUser(user);
         } catch (NotFoundException ex) {
             throw new UnauthorizedException("未登录或登录已过期");
@@ -107,7 +111,36 @@ public class AuthService {
     }
 
     public boolean isAdmin(String username) {
-        return "admin".equals(normalizeUsername(username));
+        if (isRootAdmin(username)) return true;
+        try {
+            return repository.getUserByUsername(username).isAdmin();
+        } catch (NotFoundException | BadRequestException ex) {
+            return false;
+        }
+    }
+
+    public boolean isBanned(String username) {
+        try {
+            return repository.getUserByUsername(username).isBanned();
+        } catch (NotFoundException | BadRequestException ex) {
+            return true;
+        }
+    }
+
+    public void setUserAdmin(String targetUsername, boolean admin) {
+        String normalized = normalizeUsername(targetUsername);
+        if (isRootAdmin(normalized) && !admin) {
+            throw new BadRequestException("不能取消内置管理员权限");
+        }
+        repository.updateUserAdmin(normalized, admin);
+    }
+
+    public void setUserBanned(String targetUsername, boolean banned) {
+        String normalized = normalizeUsername(targetUsername);
+        if (isRootAdmin(normalized) && banned) {
+            throw new BadRequestException("不能封禁内置管理员");
+        }
+        repository.updateUserBanned(normalized, banned);
     }
 
     private String createSession(String username) {
@@ -117,11 +150,15 @@ public class AuthService {
     }
 
     private String normalizeUsername(String username) {
-        String normalized = username == null ? "" : username.trim().toLowerCase(Locale.ROOT);
-        if (normalized.length() < 3 || normalized.length() > 32 || !normalized.matches("[a-z0-9._-]+")) {
-            throw new BadRequestException("用户名需要 3-32 位，仅允许字母、数字、点、下划线和短横线");
+        String normalized = username == null ? "" : username.trim();
+        if (normalized.length() < 2 || normalized.length() > 32 || !normalized.matches("[\\p{IsHan}a-zA-Z0-9._-]+")) {
+            throw new BadRequestException("用户名需要 2-32 位，仅允许汉字、字母、数字、点、下划线和短横线");
         }
         return normalized;
+    }
+
+    private boolean isRootAdmin(String username) {
+        return "admin".equals(username == null ? "" : username.trim());
     }
 
     private void validatePassword(String password) {
@@ -132,6 +169,6 @@ public class AuthService {
     }
 
     private AuthUser toAuthUser(UserAccount user) {
-        return new AuthUser(user.getId(), user.getUsername(), user.getCreatedAt(), isAdmin(user.getUsername()));
+        return new AuthUser(user.getId(), user.getUsername(), user.getCreatedAt(), isAdmin(user.getUsername()), user.isBanned());
     }
 }

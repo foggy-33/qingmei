@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
+  adminStreamUrl,
   campusShareBase,
   clearAuthToken,
   createShare,
@@ -14,6 +15,8 @@ import {
   logoutUser,
   publicShareBase,
   registerUser,
+  setAdminUser,
+  setBannedUser,
   shareStreamUrl,
   streamUrl,
   updateShareAnnotations,
@@ -57,6 +60,7 @@ const shareLinks = ref({});
 const expiryHours = ref(24);
 const savedShares = ref({});
 const uploadProgress = ref({ visible: false, name: "", percent: 0, speed: "0 KB/s" });
+const cancelUpload = ref(null);
 const shareMode = ref(false);
 const shareToken = ref("");
 const sharedAsset = ref(null);
@@ -64,6 +68,7 @@ const sharedAnnotations = ref([]);
 const shareLoading = ref(false);
 const adminLoading = ref(false);
 const adminOverview = ref(null);
+const adminPreviewAsset = ref(null);
 
 const dragging = ref(false);
 const fileInput = ref(null);
@@ -370,7 +375,10 @@ async function loadAssets() {
 
 const selectedProject = computed(() => projects.value.find((p) => p.id === selectedProjectId.value) || null);
 const projectAssets = computed(() => assets.value.filter((a) => assetMeta.value[a.id]?.projectId === selectedProjectId.value));
-const selectedAsset = computed(() => shareMode.value ? sharedAsset.value : (assets.value.find((a) => a.id === selectedAssetId.value) || null));
+const selectedAsset = computed(() => {
+  if (adminPreviewAsset.value) return adminPreviewAsset.value;
+  return shareMode.value ? sharedAsset.value : (assets.value.find((a) => a.id === selectedAssetId.value) || null);
+});
 
 const folderFiles = computed(() =>
   projectAssets.value.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
@@ -416,6 +424,11 @@ const accessLabel = computed(() =>
   window.location.origin === campusShareBase() ? "局域网访问" : "公网访问"
 );
 const isAdmin = computed(() => !!currentUser.value?.admin);
+const pageTitle = computed(() => {
+  if (view.value === "admin") return "管理后台";
+  if (view.value === "detail") return "批注页面";
+  return selectedProject.value?.name || "默认项目";
+});
 
 function formatDate(v) {
   if (!v) return "-";
@@ -536,6 +549,7 @@ async function loadAdminOverview() {
 }
 
 function openAsset(id) {
+  adminPreviewAsset.value = null;
   shareMode.value = false;
   shareToken.value = "";
   sharedAsset.value = null;
@@ -608,6 +622,31 @@ async function batchShare() {
   status.value = "分享链接已复制";
 }
 
+function openAdminAsset(asset) {
+  adminPreviewAsset.value = {
+    id: asset.id,
+    owner_username: asset.owner_username,
+    original_name: asset.original_name,
+    mime_type: asset.mime_type,
+    size_bytes: asset.size_bytes,
+    created_at: asset.created_at
+  };
+  shareMode.value = false;
+  shareToken.value = "";
+  sharedAsset.value = null;
+  sharedAnnotations.value = [];
+  selectedAssetId.value = "";
+  noteText.value = "";
+  view.value = "detail";
+  pausedAtSec.value = null;
+  pauseDetected.value = false;
+}
+
+function detailStreamSrc() {
+  if (adminPreviewAsset.value) return adminStreamUrl(adminPreviewAsset.value.id);
+  return shareMode.value ? shareStreamUrl(shareToken.value) : streamUrl(selectedAsset.value.id);
+}
+
 async function shareAsset(id) {
   const asset = assets.value.find((a) => a.id === id);
   if (!asset) return;
@@ -678,6 +717,8 @@ async function uploadOne(file) {
         percent,
         speed: `${formatBytes(bytesPerSecond)}/s`
       };
+    }, (cancel) => {
+      cancelUpload.value = cancel;
     });
     await loadAssets();
     uploadProgress.value = { visible: true, name: file.name, percent: 100, speed: uploadProgress.value.speed };
@@ -690,7 +731,42 @@ async function uploadOne(file) {
     uploadProgress.value = { visible: false, name: "", percent: 0, speed: "0 KB/s" };
   } finally {
     uploading.value = false;
+    cancelUpload.value = null;
   }
+}
+
+async function updateUserAdmin(user) {
+  if (!isAdmin.value || !user) return;
+  if (user.username === "admin" && user.admin) {
+    status.value = "不能取消内置管理员权限";
+    return;
+  }
+  try {
+    adminOverview.value = await setAdminUser(user.username, !user.admin);
+    status.value = user.admin ? "已取消管理员权限" : "已设为管理员";
+  } catch (err) {
+    status.value = err.message || "更新管理员权限失败";
+  }
+}
+
+async function updateUserBanned(user) {
+  if (!isAdmin.value || !user) return;
+  if (user.username === "admin") {
+    status.value = "不能封禁内置管理员";
+    return;
+  }
+  const next = !user.banned;
+  if (next && !window.confirm(`确定封禁「${user.username}」吗？该用户将无法继续使用系统。`)) return;
+  try {
+    adminOverview.value = await setBannedUser(user.username, next);
+    status.value = next ? "用户已封禁" : "用户已解封";
+  } catch (err) {
+    status.value = err.message || "更新封禁状态失败";
+  }
+}
+
+function onCancelUpload() {
+  cancelUpload.value?.();
 }
 
 async function onPickFile(e) {
@@ -724,7 +800,7 @@ function currentNoteTimeSec() {
 }
 
 async function addAnnotation() {
-  if (!selectedAsset.value || !videoRef.value) return;
+  if (adminPreviewAsset.value || !selectedAsset.value || !videoRef.value) return;
   const text = noteText.value.trim();
   if (!text) return;
   const note = {
@@ -749,7 +825,7 @@ async function addAnnotation() {
 }
 
 async function addReply(noteId) {
-  if (!selectedAsset.value) return;
+  if (adminPreviewAsset.value || !selectedAsset.value) return;
   const text = (replyDrafts.value[noteId] || "").trim();
   if (!text) return;
   const source = shareMode.value ? sharedAnnotations.value : (annotationMap.value[selectedAsset.value.id] || []);
@@ -773,7 +849,7 @@ async function addReply(noteId) {
 }
 
 async function removeAnnotation(noteId) {
-  if (!selectedAsset.value) return;
+  if (adminPreviewAsset.value || !selectedAsset.value) return;
   if (shareMode.value) {
     sharedAnnotations.value = sharedAnnotations.value.filter((n) => n.id !== noteId);
   } else {
@@ -844,7 +920,7 @@ onBeforeUnmount(() => {
       <div class="auth-brand">
         <span class="mark">QM</span>
         <div>
-          <h1>青梅审片台</h1>
+          <h1>青媒审片台</h1>
           <p>登录后进入你的独立项目空间</p>
         </div>
       </div>
@@ -857,7 +933,7 @@ onBeforeUnmount(() => {
       <form class="auth-form" @submit.prevent="submitAuth">
         <label>
           用户名
-          <input v-model.trim="authForm.username" class="input" type="text" placeholder="3-32 位字母、数字或 ._-" autocomplete="username" required />
+          <input v-model.trim="authForm.username" class="input" type="text" placeholder="2-32 位汉字、字母、数字或 ._-" autocomplete="username" required />
         </label>
         <label>
           密码
@@ -876,7 +952,7 @@ onBeforeUnmount(() => {
       <div class="brand">
         <div>
           <strong>青媒审片台</strong>
-          <span>{{ currentUser.username }}</span>
+          <span class="user-name">{{ currentUser.username }}</span>
         </div>
       </div>
 
@@ -896,14 +972,12 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <button class="logout" @click="onLogout">退出登录</button>
     </aside>
 
     <main class="main">
       <header class="topbar">
         <div>
-          <p class="crumb">{{ selectedProject?.name || "-" }}</p>
-          <h1>{{ view === "admin" ? "管理后台" : (view === "home" ? "素材库" : "批注页面") }}</h1>
+          <h1>{{ pageTitle }}</h1>
         </div>
         <div class="top-actions">
           <span class="access-badge">{{ accessLabel }}</span>
@@ -913,8 +987,10 @@ onBeforeUnmount(() => {
             <strong>{{ uploadProgress.percent }}%</strong>
             <span>{{ uploadProgress.speed }}</span>
             <small>{{ uploadProgress.name }}</small>
+            <button v-if="uploading" @click="onCancelUpload">取消</button>
           </div>
           <button class="btn ghost" @click="loadAssets">刷新</button>
+          <button class="btn ghost logout top-logout" @click="onLogout">退出登录</button>
         </div>
       </header>
 
@@ -952,11 +1028,20 @@ onBeforeUnmount(() => {
               <article v-for="u in adminOverview.users" :key="u.id" class="admin-user">
                 <div class="admin-user-title">
                   <div>
-                    <strong>{{ u.username }}</strong>
+                    <strong>
+                      {{ u.username }}
+                      <span v-if="u.admin" class="role-chip">管理员</span>
+                      <span v-if="u.banned" class="ban-chip">已封禁</span>
+                    </strong>
                     <p>注册于 {{ formatDate(u.created_at) }}</p>
                   </div>
                   <div class="admin-user-metrics">
-                    <span>{{ u.asset_count }} 个素材</span>
+                    <button class="mini-action" @click="updateUserAdmin(u)">
+                      {{ u.admin ? "取消管理员" : "设为管理员" }}
+                    </button>
+                    <button class="mini-action danger" @click="updateUserBanned(u)">
+                      {{ u.banned ? "解封" : "封禁" }}
+                    </button>
                     <span>{{ u.video_count }} 个视频</span>
                     <span>{{ formatBytes(u.storage_bytes) }}</span>
                   </div>
@@ -973,8 +1058,10 @@ onBeforeUnmount(() => {
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="a in u.assets" :key="a.id">
-                      <td>{{ a.original_name }}</td>
+                    <tr v-for="a in u.assets" :key="a.id" class="admin-asset-row" @click="openAdminAsset(a)">
+                      <td>
+                        <button class="admin-asset-link">{{ a.original_name }}</button>
+                      </td>
                       <td>{{ a.mime_type }}</td>
                       <td>{{ formatBytes(a.size_bytes) }}</td>
                       <td>{{ formatDate(a.created_at) }}</td>
@@ -1052,14 +1139,19 @@ onBeforeUnmount(() => {
 
       <template v-else>
         <section class="detail">
-          <button class="back" @click="view = 'home'">返回素材库</button>
+          <button class="back" @click="adminPreviewAsset ? (adminPreviewAsset = null, view = 'admin') : (view = 'home')">
+            {{ adminPreviewAsset ? "返回管理后台" : "返回素材库" }}
+          </button>
           <div v-if="selectedAsset">
             <div class="detail-title">
               <div>
                 <h2>{{ assetAlias[selectedAsset.id] || selectedAsset.original_name }}</h2>
-                <p>{{ selectedAsset.mime_type }} · {{ formatBytes(selectedAsset.size_bytes) }}</p>
+                <p>
+                  <span v-if="adminPreviewAsset">{{ adminPreviewAsset.owner_username }} · </span>
+                  {{ selectedAsset.mime_type }} · {{ formatBytes(selectedAsset.size_bytes) }}
+                </p>
               </div>
-              <button class="btn primary" @click="onCreateShareInDetail">复制批注页面链接</button>
+              <button v-if="!adminPreviewAsset" class="btn primary" @click="onCreateShareInDetail">复制审阅链接</button>
             </div>
 
             <div class="player">
@@ -1067,13 +1159,13 @@ onBeforeUnmount(() => {
                 ref="videoRef"
                 controls
                 class="video"
-                :src="shareMode ? shareStreamUrl(shareToken) : streamUrl(selectedAsset.id)"
+                :src="detailStreamSrc()"
                 @pause="onVideoPause"
                 @play="onVideoPlay"
               ></video>
             </div>
 
-            <section class="note-block">
+            <section v-if="!adminPreviewAsset" class="note-block">
               <div class="note-head">
                 <h3>时间轴批注</h3>
                 <span class="time-chip" :class="{ active: pauseDetected }">
@@ -1117,7 +1209,7 @@ onBeforeUnmount(() => {
 
         <template v-if="menu.type === 'asset'">
           <button @click="handleContextAction('open')">打开批注页</button>
-          <button @click="handleContextAction('share')">分享智能链接</button>
+          <button @click="handleContextAction('share')">分享链接</button>
           <button @click="handleContextAction('rename')">重命名</button>
           <button class="danger" @click="handleContextAction('delete')">删除</button>
         </template>
@@ -1285,17 +1377,29 @@ label {
 }
 
 .brand {
-  margin-bottom: 18px;
+  margin-bottom: 22px;
+}
+
+.brand strong {
+  display: block;
+  color: #0f172a;
+  font-size: 22px;
+  line-height: 1.15;
+  font-weight: 900;
 }
 
 .brand span {
   display: block;
-  font-size: 12px;
-  margin-top: 2px;
+  margin-top: 8px;
 }
 
-.new-project,
-.logout {
+.brand .user-name {
+  color: #1d4ed8;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.new-project {
   border: 1px solid #d8e1ed;
   border-radius: 10px;
   background: #f8fafc;
@@ -1331,8 +1435,7 @@ label {
   color: #1d4ed8;
 }
 
-.logout {
-  margin-top: auto;
+.top-logout {
   color: #64748b;
 }
 
@@ -1349,8 +1452,8 @@ label {
 }
 
 h1 {
-  font-size: 26px;
-  margin-top: 3px;
+  font-size: 32px;
+  line-height: 1.15;
 }
 
 .top-actions {
@@ -1376,7 +1479,7 @@ h1 {
   color: #1d4ed8;
   padding: 7px 10px;
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto 1fr auto;
   gap: 2px 8px;
   align-items: center;
 }
@@ -1392,11 +1495,23 @@ h1 {
 }
 
 .upload-toast small {
-  grid-column: 1 / -1;
+  grid-column: 1 / 3;
   color: #64748b;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.upload-toast button {
+  grid-row: 1 / 3;
+  grid-column: 3;
+  border: 0;
+  border-radius: 8px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-weight: 800;
+  padding: 6px 8px;
 }
 
 .hidden {
@@ -1712,6 +1827,42 @@ h1 {
   font-weight: 800;
 }
 
+.role-chip,
+.ban-chip {
+  display: inline-flex;
+  margin-left: 8px;
+  border-radius: 999px;
+  padding: 3px 7px;
+  font-size: 12px;
+  vertical-align: middle;
+}
+
+.role-chip {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.ban-chip {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.mini-action {
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  background: #fff;
+  color: #1d4ed8;
+  cursor: pointer;
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.mini-action.danger {
+  border-color: #fecaca;
+  color: #dc2626;
+}
+
 .admin-table {
   width: 100%;
   border-collapse: collapse;
@@ -1733,6 +1884,24 @@ h1 {
 .admin-table td {
   color: #334155;
   word-break: break-all;
+}
+
+.admin-asset-row {
+  cursor: pointer;
+}
+
+.admin-asset-row:hover {
+  background: #f8fafc;
+}
+
+.admin-asset-link {
+  border: 0;
+  background: transparent;
+  color: #2563eb;
+  padding: 0;
+  cursor: pointer;
+  font-weight: 800;
+  text-align: left;
 }
 
 .small-empty.compact {
@@ -1968,8 +2137,75 @@ h1 {
     align-items: flex-start;
   }
 
+  .admin-table,
+  .admin-table thead,
+  .admin-table tbody,
+  .admin-table tr,
+  .admin-table th,
+  .admin-table td {
+    display: block;
+  }
+
+  .admin-table thead {
+    display: none;
+  }
+
+  .admin-table tr {
+    border-top: 1px solid #edf1f7;
+    padding: 10px 14px;
+  }
+
+  .admin-table td {
+    border-top: 0;
+    padding: 4px 0;
+  }
+
+  .admin-table td:nth-child(2),
+  .admin-table td:nth-child(3),
+  .admin-table td:nth-child(4) {
+    color: #64748b;
+    font-size: 12px;
+  }
+
   .asset-card {
     width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .main {
+    padding: 14px 12px;
+  }
+
+  .top-actions {
+    width: 100%;
+  }
+
+  .top-actions .btn,
+  .access-badge {
+    flex: 1;
+    text-align: center;
+  }
+
+  .library,
+  .detail,
+  .admin-panel {
+    border-radius: 10px;
+  }
+
+  .admin-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-head {
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .admin-head .btn,
+  .admin-head .back {
+    width: 100%;
+    text-align: center;
   }
 }
 </style>

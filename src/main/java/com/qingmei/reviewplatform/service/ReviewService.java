@@ -93,6 +93,10 @@ public class ReviewService {
         return repository.listAssets(ownerUsername, limit, offset);
     }
 
+    public Asset getAssetForAdmin(String id) {
+        return repository.getAssetById(id);
+    }
+
     public void deleteAsset(String ownerUsername, String assetId) {
         Asset asset = repository.getAssetByIdAndOwner(assetId, ownerUsername);
         repository.deleteAssetByIdAndOwner(assetId, ownerUsername);
@@ -197,6 +201,8 @@ public class ReviewService {
                     "id", user.getId(),
                     "username", user.getUsername(),
                     "created_at", user.getCreatedAt(),
+                    "admin", user.isAdmin() || "admin".equals(user.getUsername()),
+                    "banned", user.isBanned(),
                     "asset_count", userAssets.size(),
                     "video_count", videoCount,
                     "storage_bytes", storageBytes,

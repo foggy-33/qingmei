@@ -61,11 +61,16 @@ public class ReviewRepository {
                     id UUID PRIMARY KEY,
                     username TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
+                    is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+                    banned BOOLEAN NOT NULL DEFAULT FALSE,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
                 """,
                 "ALTER TABLE assets ADD COLUMN IF NOT EXISTS owner_username TEXT NOT NULL DEFAULT 'system';",
                 "ALTER TABLE share_links ADD COLUMN IF NOT EXISTS annotations_json TEXT NOT NULL DEFAULT '[]';",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN NOT NULL DEFAULT FALSE;",
+                "UPDATE users SET is_admin = TRUE WHERE username = 'admin';",
                 "CREATE INDEX IF NOT EXISTS idx_assets_owner_created_at ON assets(owner_username, created_at DESC);",
                 "CREATE INDEX IF NOT EXISTS idx_assets_created_at ON assets(created_at DESC);",
                 "CREATE INDEX IF NOT EXISTS idx_share_links_token ON share_links(token);",
@@ -77,15 +82,15 @@ public class ReviewRepository {
 
     public void createUser(UserAccount user) {
         jdbcTemplate.update(
-                "INSERT INTO users (id, username, password_hash, created_at) VALUES (?::uuid, ?, ?, ?)",
-                user.getId(), user.getUsername(), user.getPasswordHash(), user.getCreatedAt()
+                "INSERT INTO users (id, username, password_hash, is_admin, banned, created_at) VALUES (?::uuid, ?, ?, ?, ?, ?)",
+                user.getId(), user.getUsername(), user.getPasswordHash(), user.isAdmin(), user.isBanned(), user.getCreatedAt()
         );
     }
 
     public UserAccount getUserByUsername(String username) {
         try {
             return jdbcTemplate.queryForObject(
-                    "SELECT id, username, password_hash, created_at FROM users WHERE username = ?",
+                    "SELECT id, username, password_hash, is_admin, banned, created_at FROM users WHERE username = ?",
                     this::mapUser,
                     username
             );
@@ -96,9 +101,23 @@ public class ReviewRepository {
 
     public List<UserAccount> listUsers() {
         return jdbcTemplate.query(
-                "SELECT id, username, password_hash, created_at FROM users ORDER BY created_at DESC",
+                "SELECT id, username, password_hash, is_admin, banned, created_at FROM users ORDER BY created_at DESC",
                 this::mapUser
         );
+    }
+
+    public void updateUserAdmin(String username, boolean admin) {
+        int rows = jdbcTemplate.update("UPDATE users SET is_admin = ? WHERE username = ?", admin, username);
+        if (rows == 0) {
+            throw new NotFoundException("user not found");
+        }
+    }
+
+    public void updateUserBanned(String username, boolean banned) {
+        int rows = jdbcTemplate.update("UPDATE users SET banned = ? WHERE username = ?", banned, username);
+        if (rows == 0) {
+            throw new NotFoundException("user not found");
+        }
     }
 
     public void createAsset(Asset a) {
@@ -236,6 +255,8 @@ public class ReviewRepository {
         user.setId(rs.getString("id"));
         user.setUsername(rs.getString("username"));
         user.setPasswordHash(rs.getString("password_hash"));
+        user.setAdmin(rs.getBoolean("is_admin"));
+        user.setBanned(rs.getBoolean("banned"));
         user.setCreatedAt(rs.getObject("created_at", OffsetDateTime.class));
         return user;
     }

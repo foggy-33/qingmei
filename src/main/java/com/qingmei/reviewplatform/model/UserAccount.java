@@ -7,6 +7,8 @@ public class UserAccount {
     private String username;
     private String passwordHash;
     private OffsetDateTime createdAt;
+    private boolean admin;
+    private boolean banned;
 
     public String getId() {
         return id;
@@ -38,5 +40,21 @@ public class UserAccount {
 
     public void setCreatedAt(OffsetDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public boolean isAdmin() {
+        return admin;
+    }
+
+    public void setAdmin(boolean admin) {
+        this.admin = admin;
+    }
+
+    public boolean isBanned() {
+        return banned;
+    }
+
+    public void setBanned(boolean banned) {
+        this.banned = banned;
     }
 }
