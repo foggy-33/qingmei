@@ -25,11 +25,11 @@ public class WebConfig {
                 registry.addMapping("/**")
                         .allowedOrigins(
                                 "http://localhost:5173",
-                                "http://127.0.0.1:5173",
-                                "https://qm.upcshare.cn",
-                                "https://campus-qm.upcshare.cn:8088",
-                                "https://qm.upcshare.cn:8088",
-                                "https://qm.upcshare.cn:8443"
+                                "http://127.0.0.1:5173"
+                        )
+                        .allowedOriginPatterns(
+                                "https://*.upcshare.cn",
+                                "https://*.upcshare.cn:*"
                         )
                         .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
                         .allowedHeaders("Origin", "Content-Type", "Authorization")
