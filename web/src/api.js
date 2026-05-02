@@ -208,6 +208,11 @@ export function adminStreamUrl(assetId) {
   return `${API_BASE}/api/v1/admin/assets/${assetId}/stream?access_token=${token}`;
 }
 
+export function adminDownloadUrl(assetId) {
+  const token = encodeURIComponent(getAuthToken());
+  return `${API_BASE}/api/v1/admin/assets/${assetId}/download?access_token=${token}`;
+}
+
 export function downloadUrl(assetId) {
   const token = encodeURIComponent(getAuthToken());
   return `${API_BASE}/api/v1/assets/${assetId}/download?access_token=${token}`;
@@ -215,4 +220,8 @@ export function downloadUrl(assetId) {
 
 export function shareStreamUrl(token) {
   return `${API_BASE}/s/${encodeURIComponent(token)}`;
+}
+
+export function shareDownloadUrl(token) {
+  return `${API_BASE}/s/${encodeURIComponent(token)}/download`;
 }

@@ -1,11 +1,13 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
+  adminDownloadUrl,
   adminStreamUrl,
   campusShareBase,
   clearAuthToken,
   createShare,
   deleteAsset,
+  downloadUrl,
   getAdminOverview,
   getCurrentUser,
   getShare,
@@ -18,6 +20,7 @@ import {
   setAdminUser,
   setBannedUser,
   shareStreamUrl,
+  shareDownloadUrl,
   streamUrl,
   updateShareAnnotations,
   uploadAsset
@@ -426,7 +429,7 @@ const accessLabel = computed(() =>
 const isAdmin = computed(() => !!currentUser.value?.admin);
 const pageTitle = computed(() => {
   if (view.value === "admin") return "管理后台";
-  if (view.value === "detail") return "批注页面";
+  if (view.value === "detail") return selectedAsset.value ? displayAssetName(selectedAsset.value) : "文件详情";
   return selectedProject.value?.name || "默认项目";
 });
 
@@ -459,6 +462,21 @@ function formatBytes(bytes) {
     i += 1;
   }
   return `${n.toFixed(1)} ${units[i]}`;
+}
+
+function displayAssetName(asset) {
+  if (!asset) return "";
+  return assetAlias.value[asset.id] || asset.original_name;
+}
+
+function isVideoAsset(asset) {
+  return String(asset?.mime_type || "").startsWith("video/");
+}
+
+function isArchiveAsset(asset) {
+  const name = String(asset?.original_name || "").toLowerCase();
+  const mime = String(asset?.mime_type || "").toLowerCase();
+  return mime.includes("zip") || mime.includes("rar") || mime.includes("7z") || name.endsWith(".zip") || name.endsWith(".rar") || name.endsWith(".7z");
 }
 
 function selectProject(id) {
@@ -647,6 +665,13 @@ function detailStreamSrc() {
   return shareMode.value ? shareStreamUrl(shareToken.value) : streamUrl(selectedAsset.value.id);
 }
 
+function detailDownloadHref() {
+  if (!selectedAsset.value) return "";
+  if (adminPreviewAsset.value) return adminDownloadUrl(adminPreviewAsset.value.id);
+  if (shareMode.value) return shareDownloadUrl(shareToken.value);
+  return downloadUrl(selectedAsset.value.id);
+}
+
 async function shareAsset(id) {
   const asset = assets.value.find((a) => a.id === id);
   if (!asset) return;
@@ -682,7 +707,7 @@ async function onCreateShareInDetail() {
   if (shareMode.value) {
     const link = `${publicShareBase()}${window.location.pathname}?s=${encodeURIComponent(shareToken.value)}`;
     await navigator.clipboard.writeText(link);
-    status.value = "批注页面分享链接已复制";
+    status.value = "分享链接已复制";
     return;
   }
   const data = await createShare(selectedAsset.value.id, expiryHours.value, selectedAnnotations.value);
@@ -698,7 +723,7 @@ async function onCreateShareInDetail() {
   };
   saveLocalState();
   await navigator.clipboard.writeText(link);
-  status.value = "批注页面分享链接已复制";
+  status.value = "分享链接已复制";
 }
 
 async function uploadOne(file) {
@@ -1145,16 +1170,19 @@ onBeforeUnmount(() => {
           <div v-if="selectedAsset">
             <div class="detail-title">
               <div>
-                <h2>{{ assetAlias[selectedAsset.id] || selectedAsset.original_name }}</h2>
+                <h2>{{ displayAssetName(selectedAsset) }}</h2>
                 <p>
                   <span v-if="adminPreviewAsset">{{ adminPreviewAsset.owner_username }} · </span>
                   {{ selectedAsset.mime_type }} · {{ formatBytes(selectedAsset.size_bytes) }}
                 </p>
               </div>
-              <button v-if="!adminPreviewAsset" class="btn primary" @click="onCreateShareInDetail">复制审阅链接</button>
+              <div class="detail-actions">
+                <a class="btn" :href="detailDownloadHref()" target="_blank" rel="noreferrer">下载文件</a>
+                <button v-if="!adminPreviewAsset" class="btn primary" @click="onCreateShareInDetail">复制分享链接</button>
+              </div>
             </div>
 
-            <div class="player">
+            <div v-if="isVideoAsset(selectedAsset)" class="player">
               <video
                 ref="videoRef"
                 controls
@@ -1164,8 +1192,13 @@ onBeforeUnmount(() => {
                 @play="onVideoPlay"
               ></video>
             </div>
+            <div v-else class="file-preview">
+              <strong>{{ isArchiveAsset(selectedAsset) ? "压缩包" : "文件" }}</strong>
+              <span>{{ displayAssetName(selectedAsset) }}</span>
+              <a class="btn primary" :href="detailDownloadHref()" target="_blank" rel="noreferrer">下载文件</a>
+            </div>
 
-            <section v-if="!adminPreviewAsset" class="note-block">
+            <section v-if="!adminPreviewAsset && isVideoAsset(selectedAsset)" class="note-block">
               <div class="note-head">
                 <h3>时间轴批注</h3>
                 <span class="time-chip" :class="{ active: pauseDetected }">
@@ -1204,11 +1237,12 @@ onBeforeUnmount(() => {
         </section>
       </template>
 
+      <div v-if="menu.visible" class="menu-backdrop" @click="closeMenu"></div>
       <div v-if="menu.visible" class="ctx-menu" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }">
-        <button v-if="menu.type === 'blank'" @click="handleContextAction('upload')">上传文件</button>
+        <button v-if="menu.type === 'blank'" @click="handleContextAction('upload')">上传文件/压缩包</button>
 
         <template v-if="menu.type === 'asset'">
-          <button @click="handleContextAction('open')">打开批注页</button>
+          <button @click="handleContextAction('open')">打开</button>
           <button @click="handleContextAction('share')">分享链接</button>
           <button @click="handleContextAction('rename')">重命名</button>
           <button class="danger" @click="handleContextAction('delete')">删除</button>
@@ -1935,6 +1969,13 @@ h1 {
   margin-bottom: 14px;
 }
 
+.detail-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .detail-title p {
   margin: 5px 0 0;
 }
@@ -1952,6 +1993,29 @@ h1 {
   aspect-ratio: 16/9;
   max-height: 70vh;
   object-fit: contain;
+}
+
+.file-preview {
+  border: 1px dashed #cbd5e1;
+  border-radius: 14px;
+  background: #f8fafc;
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  color: #334155;
+  text-align: center;
+  padding: 24px;
+}
+
+.file-preview strong {
+  color: #111827;
+  font-size: 24px;
+}
+
+.file-preview span {
+  word-break: break-all;
 }
 
 .note-block {
@@ -2084,6 +2148,13 @@ h1 {
   padding: 6px;
 }
 
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: transparent;
+}
+
 .ctx-menu button {
   width: 100%;
   border: 0;
@@ -2206,6 +2277,37 @@ h1 {
   .admin-head .back {
     width: 100%;
     text-align: center;
+  }
+
+  .detail-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .detail-actions .btn {
+    flex: 1;
+    text-align: center;
+  }
+
+  .menu-backdrop {
+    background: rgba(15, 23, 42, 0.22);
+  }
+
+  .ctx-menu {
+    left: 12px !important;
+    right: 12px;
+    top: auto !important;
+    bottom: 14px;
+    min-width: 0;
+    border-radius: 16px;
+    padding: 8px;
+  }
+
+  .ctx-menu button {
+    text-align: center;
+    padding: 14px 10px;
+    font-size: 16px;
+    font-weight: 800;
   }
 }
 </style>

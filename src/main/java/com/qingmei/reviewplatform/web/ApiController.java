@@ -218,6 +218,20 @@ public class ApiController {
         }
     }
 
+    @GetMapping("/s/{token}/download")
+    public ResponseEntity<?> downloadShare(@PathVariable String token) {
+        try {
+            Asset asset = reviewService.resolveShare(token);
+            return fileResponse(asset, true);
+        } catch (ExpiredShareException ex) {
+            return ResponseEntity.status(HttpStatus.GONE).body(Map.of("error", "share link expired"));
+        } catch (NotFoundException ex) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "share link not found"));
+        } catch (Exception ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "resolve share link failed"));
+        }
+    }
+
     @GetMapping("/api/v1/public/ping")
     public ResponseEntity<Map<String, Object>> ping() {
         return ResponseEntity.ok(Map.of("ok", true));
@@ -245,6 +259,23 @@ public class ApiController {
             return error(HttpStatus.NOT_FOUND, "asset not found");
         } catch (Exception ex) {
             log.error("admin stream asset failed, id={}", id, ex);
+            return error(HttpStatus.INTERNAL_SERVER_ERROR, "get asset failed");
+        }
+    }
+
+    @GetMapping("/api/v1/admin/assets/{id}/download")
+    public ResponseEntity<?> downloadAdminAsset(HttpServletRequest request, @PathVariable String id) {
+        String username = currentUsername(request);
+        if (!authService.isAdmin(username)) {
+            return error(HttpStatus.FORBIDDEN, "admin only");
+        }
+        try {
+            Asset asset = reviewService.getAssetForAdmin(id);
+            return fileResponse(asset, true);
+        } catch (NotFoundException ex) {
+            return error(HttpStatus.NOT_FOUND, "asset not found");
+        } catch (Exception ex) {
+            log.error("admin download asset failed, id={}", id, ex);
             return error(HttpStatus.INTERNAL_SERVER_ERROR, "get asset failed");
         }
     }
