@@ -222,6 +222,15 @@ public class ApiController {
         return ResponseEntity.ok(Map.of("ok", true));
     }
 
+    @GetMapping("/api/v1/admin/overview")
+    public ResponseEntity<Map<String, Object>> adminOverview(HttpServletRequest request) {
+        String username = currentUsername(request);
+        if (!authService.isAdmin(username)) {
+            return error(HttpStatus.FORBIDDEN, "admin only");
+        }
+        return ResponseEntity.ok(reviewService.adminOverview());
+    }
+
     @PutMapping("/api/v1/shares/{token}/annotations")
     public ResponseEntity<Map<String, Object>> updateShareAnnotations(HttpServletRequest request,
                                                                        @PathVariable String token,

@@ -94,6 +94,13 @@ public class ReviewRepository {
         }
     }
 
+    public List<UserAccount> listUsers() {
+        return jdbcTemplate.query(
+                "SELECT id, username, password_hash, created_at FROM users ORDER BY created_at DESC",
+                this::mapUser
+        );
+    }
+
     public void createAsset(Asset a) {
         jdbcTemplate.update(
                 "INSERT INTO assets (id, owner_username, original_name, stored_name, mime_type, size_bytes, storage_path, created_at) VALUES (?::uuid, ?, ?, ?, ?, ?, ?, ?)",
@@ -133,6 +140,13 @@ public class ReviewRepository {
                 ownerUsername,
                 limit,
                 offset
+        );
+    }
+
+    public List<Asset> listAllAssets() {
+        return jdbcTemplate.query(
+                "SELECT id, owner_username, original_name, stored_name, mime_type, size_bytes, storage_path, created_at FROM assets ORDER BY created_at DESC",
+                this::mapAsset
         );
     }
 

@@ -134,6 +134,10 @@ export async function updateShareAnnotations(token, annotations = []) {
   });
 }
 
+export async function getAdminOverview() {
+  return req("/api/v1/admin/overview");
+}
+
 export async function registerUser(username, password) {
   const data = await req("/api/v1/auth/register", {
     method: "POST",

@@ -34,7 +34,7 @@ public class AuthService {
         this.appProperties = appProperties;
     }
 
-    public record AuthUser(String id, String username, OffsetDateTime createdAt) {
+    public record AuthUser(String id, String username, OffsetDateTime createdAt, boolean admin) {
     }
 
     public record AuthResult(String token, AuthUser user) {
@@ -106,6 +106,10 @@ public class AuthService {
         return redisTemplate.opsForValue().get(SESSION_KEY_PREFIX + token);
     }
 
+    public boolean isAdmin(String username) {
+        return "admin".equals(normalizeUsername(username));
+    }
+
     private String createSession(String username) {
         String token = UUID.randomUUID().toString().replace("-", "") + UUID.randomUUID().toString().replace("-", "");
         redisTemplate.opsForValue().set(SESSION_KEY_PREFIX + token, username, appProperties.getAuthSessionTtl());
@@ -128,6 +132,6 @@ public class AuthService {
     }
 
     private AuthUser toAuthUser(UserAccount user) {
-        return new AuthUser(user.getId(), user.getUsername(), user.getCreatedAt());
+        return new AuthUser(user.getId(), user.getUsername(), user.getCreatedAt(), isAdmin(user.getUsername()));
     }
 }

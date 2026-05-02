@@ -5,6 +5,7 @@ import {
   clearAuthToken,
   createShare,
   deleteAsset,
+  getAdminOverview,
   getCurrentUser,
   getShare,
   hasAuthToken,
@@ -61,6 +62,8 @@ const shareToken = ref("");
 const sharedAsset = ref(null);
 const sharedAnnotations = ref([]);
 const shareLoading = ref(false);
+const adminLoading = ref(false);
+const adminOverview = ref(null);
 
 const dragging = ref(false);
 const fileInput = ref(null);
@@ -412,6 +415,7 @@ const shareItems = computed(() =>
 const accessLabel = computed(() =>
   window.location.origin === campusShareBase() ? "局域网访问" : "公网访问"
 );
+const isAdmin = computed(() => !!currentUser.value?.admin);
 
 function formatDate(v) {
   if (!v) return "-";
@@ -458,6 +462,77 @@ function createProject() {
   projects.value.unshift(project);
   selectedProjectId.value = project.id;
   saveLocalState();
+}
+
+function renameProject(id) {
+  const project = projects.value.find((p) => p.id === id);
+  if (!project) return;
+  const name = (window.prompt("重命名项目", project.name) || "").trim();
+  if (!name) return;
+  projects.value = projects.value.map((p) => p.id === id ? { ...p, name } : p);
+  saveLocalState();
+}
+
+async function removeProject(id) {
+  const project = projects.value.find((p) => p.id === id);
+  if (!project || projects.value.length <= 1) return;
+  const projectAssetIds = assets.value
+    .filter((a) => assetMeta.value[a.id]?.projectId === id)
+    .map((a) => a.id);
+  if (!window.confirm(`确定删除「${project.name}」吗？项目内 ${projectAssetIds.length} 个素材文件也会一并删除。`)) return;
+
+  status.value = "";
+  try {
+    for (const assetId of projectAssetIds) {
+      await deleteAsset(assetId);
+    }
+  } catch (err) {
+    status.value = err.message || "删除项目素材失败";
+    await loadAssets();
+    return;
+  }
+
+  projects.value = projects.value.filter((p) => p.id !== id);
+  selectedProjectId.value = selectedProjectId.value === id ? projects.value[0].id : selectedProjectId.value;
+  assets.value = assets.value.filter((a) => !projectAssetIds.includes(a.id));
+  const nextMeta = { ...assetMeta.value };
+  const nextAlias = { ...assetAlias.value };
+  const nextNotes = { ...annotationMap.value };
+  const nextShares = { ...savedShares.value };
+  for (const assetId of projectAssetIds) {
+    delete nextMeta[assetId];
+    delete nextAlias[assetId];
+    delete nextNotes[assetId];
+    delete nextShares[assetId];
+  }
+  assetMeta.value = nextMeta;
+  assetAlias.value = nextAlias;
+  annotationMap.value = nextNotes;
+  savedShares.value = nextShares;
+  view.value = "home";
+  selectedKeys.value = [];
+  saveLocalState();
+  status.value = "项目和素材已删除";
+}
+
+async function openAdmin() {
+  if (!isAdmin.value) return;
+  view.value = "admin";
+  selectedKeys.value = [];
+  await loadAdminOverview();
+}
+
+async function loadAdminOverview() {
+  if (!isAdmin.value) return;
+  adminLoading.value = true;
+  status.value = "";
+  try {
+    adminOverview.value = await getAdminOverview();
+  } catch (err) {
+    status.value = err.message || "管理后台加载失败";
+  } finally {
+    adminLoading.value = false;
+  }
 }
 
 function openAsset(id) {
@@ -734,6 +809,11 @@ async function handleContextAction(action) {
     triggerUpload();
     return;
   }
+  if (type === "project") {
+    if (action === "rename-project") renameProject(key);
+    if (action === "delete-project") await removeProject(key);
+    return;
+  }
   if (type === "folder") {
     return;
   }
@@ -794,9 +874,8 @@ onBeforeUnmount(() => {
   <div v-else class="app">
     <aside class="sidebar">
       <div class="brand">
-        <span class="mark small">QM</span>
         <div>
-          <strong>项目</strong>
+          <strong>青媒审片台</strong>
           <span>{{ currentUser.username }}</span>
         </div>
       </div>
@@ -810,6 +889,7 @@ onBeforeUnmount(() => {
           class="project-item"
           :class="{ active: p.id === selectedProjectId }"
           @click="selectProject(p.id)"
+          @contextmenu.stop="showMenu($event, 'project', p.id)"
         >
           <span>{{ p.name }}</span>
           <small>{{ assets.filter((a) => assetMeta[a.id]?.projectId === p.id).length }}</small>
@@ -823,10 +903,11 @@ onBeforeUnmount(() => {
       <header class="topbar">
         <div>
           <p class="crumb">{{ selectedProject?.name || "-" }}</p>
-          <h1>{{ view === "home" ? "素材库" : "批注页面" }}</h1>
+          <h1>{{ view === "admin" ? "管理后台" : (view === "home" ? "素材库" : "批注页面") }}</h1>
         </div>
         <div class="top-actions">
           <span class="access-badge">{{ accessLabel }}</span>
+          <button v-if="isAdmin" class="btn ghost" @click="openAdmin">管理后台</button>
           <input ref="fileInput" type="file" class="hidden" @change="onPickFile" />
           <div v-if="uploadProgress.visible" class="upload-toast">
             <strong>{{ uploadProgress.percent }}%</strong>
@@ -834,13 +915,80 @@ onBeforeUnmount(() => {
             <small>{{ uploadProgress.name }}</small>
           </div>
           <button class="btn ghost" @click="loadAssets">刷新</button>
-          <button class="btn primary" :disabled="uploading" @click="triggerUpload">{{ uploading ? "上传中..." : "上传" }}</button>
         </div>
       </header>
 
       <p v-if="status" class="status">{{ status }}</p>
 
-      <template v-if="view === 'home'">
+      <template v-if="view === 'admin'">
+        <section class="admin-panel">
+          <div class="admin-head">
+            <button class="back" @click="view = 'home'">返回素材库</button>
+            <button class="btn ghost" @click="loadAdminOverview">刷新后台</button>
+          </div>
+
+          <div v-if="adminLoading" class="empty">加载中...</div>
+          <template v-else-if="adminOverview">
+            <div class="admin-stats">
+              <div>
+                <span>用户</span>
+                <strong>{{ adminOverview.total_users }}</strong>
+              </div>
+              <div>
+                <span>素材</span>
+                <strong>{{ adminOverview.total_assets }}</strong>
+              </div>
+              <div>
+                <span>视频</span>
+                <strong>{{ adminOverview.total_videos }}</strong>
+              </div>
+              <div>
+                <span>占用空间</span>
+                <strong>{{ formatBytes(adminOverview.total_storage_bytes) }}</strong>
+              </div>
+            </div>
+
+            <div class="admin-users">
+              <article v-for="u in adminOverview.users" :key="u.id" class="admin-user">
+                <div class="admin-user-title">
+                  <div>
+                    <strong>{{ u.username }}</strong>
+                    <p>注册于 {{ formatDate(u.created_at) }}</p>
+                  </div>
+                  <div class="admin-user-metrics">
+                    <span>{{ u.asset_count }} 个素材</span>
+                    <span>{{ u.video_count }} 个视频</span>
+                    <span>{{ formatBytes(u.storage_bytes) }}</span>
+                  </div>
+                </div>
+
+                <div v-if="!u.assets.length" class="small-empty compact">暂无素材</div>
+                <table v-else class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>文件名</th>
+                      <th>类型</th>
+                      <th>大小</th>
+                      <th>上传时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="a in u.assets" :key="a.id">
+                      <td>{{ a.original_name }}</td>
+                      <td>{{ a.mime_type }}</td>
+                      <td>{{ formatBytes(a.size_bytes) }}</td>
+                      <td>{{ formatDate(a.created_at) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </article>
+            </div>
+          </template>
+          <div v-else class="empty">暂无后台数据</div>
+        </section>
+      </template>
+
+      <template v-else-if="view === 'home'">
         <section class="library">
           <nav class="library-tabs">
             <button :class="{ active: activeTab === 'files' }" @click="activeTab = 'files'">文件</button>
@@ -972,6 +1120,11 @@ onBeforeUnmount(() => {
           <button @click="handleContextAction('share')">分享智能链接</button>
           <button @click="handleContextAction('rename')">重命名</button>
           <button class="danger" @click="handleContextAction('delete')">删除</button>
+        </template>
+
+        <template v-if="menu.type === 'project'">
+          <button @click="handleContextAction('rename-project')">重命名</button>
+          <button class="danger" @click="handleContextAction('delete-project')">删除</button>
         </template>
       </div>
     </main>
@@ -1474,6 +1627,122 @@ h1 {
   flex-wrap: wrap;
 }
 
+.admin-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #fff;
+  padding: 16px;
+  min-height: calc(100vh - 104px);
+}
+
+.admin-head,
+.admin-user-title,
+.admin-user-metrics {
+  display: flex;
+  align-items: center;
+}
+
+.admin-head {
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.admin-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.admin-stats div {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 14px;
+}
+
+.admin-stats span,
+.admin-user-title p {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.admin-stats strong {
+  display: block;
+  margin-top: 6px;
+  color: #111827;
+  font-size: 22px;
+}
+
+.admin-users {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-user {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.admin-user-title {
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  background: #fbfcfe;
+}
+
+.admin-user-title p {
+  margin: 4px 0 0;
+}
+
+.admin-user-metrics {
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.admin-user-metrics span {
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.admin-table th,
+.admin-table td {
+  border-top: 1px solid #edf1f7;
+  padding: 10px 14px;
+  text-align: left;
+}
+
+.admin-table th {
+  color: #64748b;
+  background: #fff;
+}
+
+.admin-table td {
+  color: #334155;
+  word-break: break-all;
+}
+
+.small-empty.compact {
+  min-height: 80px;
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+}
+
 .detail {
   border: 1px solid #e2e8f0;
   border-radius: 16px;
@@ -1688,6 +1957,15 @@ h1 {
 
   .grid {
     grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  }
+
+  .admin-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-user-title {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .asset-card {

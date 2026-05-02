@@ -6,6 +6,7 @@ import com.qingmei.reviewplatform.config.AppProperties;
 import com.qingmei.reviewplatform.model.Asset;
 import com.qingmei.reviewplatform.model.ReviewTask;
 import com.qingmei.reviewplatform.model.ShareLink;
+import com.qingmei.reviewplatform.model.UserAccount;
 import com.qingmei.reviewplatform.repository.ReviewRepository;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -16,8 +17,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class ReviewService {
@@ -170,5 +175,56 @@ public class ReviewService {
 
     public void setReviewTaskStatus(String assetId, String status) {
         repository.setReviewTaskStatus(assetId, status);
+    }
+
+    public Map<String, Object> adminOverview() {
+        List<UserAccount> users = repository.listUsers();
+        List<Asset> assets = repository.listAllAssets();
+        Map<String, List<Asset>> assetsByOwner = assets.stream()
+                .collect(Collectors.groupingBy(Asset::getOwnerUsername, LinkedHashMap::new, Collectors.toList()));
+
+        List<Map<String, Object>> userItems = new ArrayList<>();
+        long totalBytes = 0;
+        long totalVideos = 0;
+        for (UserAccount user : users) {
+            List<Asset> userAssets = assetsByOwner.getOrDefault(user.getUsername(), List.of());
+            long storageBytes = userAssets.stream().mapToLong(Asset::getSizeBytes).sum();
+            long videoCount = userAssets.stream().filter(this::isVideo).count();
+            totalBytes += storageBytes;
+            totalVideos += videoCount;
+
+            userItems.add(Map.of(
+                    "id", user.getId(),
+                    "username", user.getUsername(),
+                    "created_at", user.getCreatedAt(),
+                    "asset_count", userAssets.size(),
+                    "video_count", videoCount,
+                    "storage_bytes", storageBytes,
+                    "assets", userAssets.stream().map(this::adminAssetItem).toList()
+            ));
+        }
+
+        return Map.of(
+                "total_users", users.size(),
+                "total_assets", assets.size(),
+                "total_videos", totalVideos,
+                "total_storage_bytes", totalBytes,
+                "users", userItems
+        );
+    }
+
+    private Map<String, Object> adminAssetItem(Asset asset) {
+        return Map.of(
+                "id", asset.getId(),
+                "owner_username", asset.getOwnerUsername(),
+                "original_name", asset.getOriginalName(),
+                "mime_type", asset.getMimeType(),
+                "size_bytes", asset.getSizeBytes(),
+                "created_at", asset.getCreatedAt()
+        );
+    }
+
+    private boolean isVideo(Asset asset) {
+        return String.valueOf(asset.getMimeType()).startsWith("video/");
     }
 }
