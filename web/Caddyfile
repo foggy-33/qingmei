@@ -3,6 +3,15 @@ qm.upcshare.cn, campus-qm.upcshare.cn {
 	encode gzip zstd
 
 	handle /api* {
+		header {
+			Access-Control-Allow-Origin "{http.request.header.Origin}"
+			Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+			Access-Control-Allow-Headers "Origin, Content-Type, Authorization"
+			Access-Control-Allow-Credentials "true"
+			Vary "Origin"
+		}
+		@preflight method OPTIONS
+		respond @preflight 204
 		reverse_proxy app:8080
 	}
 
