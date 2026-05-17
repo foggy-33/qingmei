@@ -58,6 +58,7 @@ const noteText = ref("");
 const replyDrafts = ref({});
 const videoRef = ref(null);
 const videoQuality = ref("1080p");
+const videoQualityMenuOpen = ref(false);
 const pausedAtSec = ref(null);
 const pauseDetected = ref(false);
 const shareLinks = ref({});
@@ -78,6 +79,10 @@ const dragging = ref(false);
 const fileInput = ref(null);
 const selectedKeys = ref([]);
 const menu = ref({ visible: false, x: 0, y: 0, type: "blank", key: "" });
+const videoQualityOptions = [
+  { value: "1080p", label: "1080p", hint: "高清" },
+  { value: "original", label: "原画", hint: "原始码率" }
+];
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
@@ -204,6 +209,7 @@ async function onLogout() {
   sharedAsset.value = null;
   sharedAnnotations.value = [];
   videoQuality.value = "1080p";
+  videoQualityMenuOpen.value = false;
 }
 
 function normalizeAnnotation(note) {
@@ -242,6 +248,7 @@ async function openSharedReview(token) {
     sharedAnnotations.value = parseAnnotationsJson(data.annotations_json);
     selectedAssetId.value = "";
     videoQuality.value = "1080p";
+    videoQualityMenuOpen.value = false;
     view.value = "detail";
   } catch (err) {
     status.value = err.message || "分享链接加载失败";
@@ -577,6 +584,7 @@ function openAsset(id) {
   sharedAnnotations.value = [];
   selectedAssetId.value = id;
   videoQuality.value = "1080p";
+  videoQualityMenuOpen.value = false;
   view.value = "detail";
   selectedKeys.value = [];
   pausedAtSec.value = null;
@@ -594,6 +602,11 @@ function showMenu(e, type = "blank", key = "") {
 
 function closeMenu() {
   menu.value.visible = false;
+}
+
+function closeFloatingMenus() {
+  closeMenu();
+  videoQualityMenuOpen.value = false;
 }
 
 function renameAsset(id) {
@@ -660,6 +673,7 @@ function openAdminAsset(asset) {
   selectedAssetId.value = "";
   noteText.value = "";
   videoQuality.value = "1080p";
+  videoQualityMenuOpen.value = false;
   view.value = "detail";
   pausedAtSec.value = null;
   pauseDetected.value = false;
@@ -670,10 +684,20 @@ function detailStreamSrc() {
   return shareMode.value ? shareStreamUrl(shareToken.value, videoQuality.value) : streamUrl(selectedAsset.value.id, videoQuality.value);
 }
 
-async function onVideoQualityChange() {
+function selectedVideoQualityLabel() {
+  return videoQualityOptions.find((item) => item.value === videoQuality.value)?.label || "1080p";
+}
+
+async function changeVideoQuality(quality) {
+  if (quality === videoQuality.value) {
+    videoQualityMenuOpen.value = false;
+    return;
+  }
   const video = videoRef.value;
   const time = Number(video?.currentTime || 0);
   const shouldResume = !!video && !video.paused;
+  videoQuality.value = quality;
+  videoQualityMenuOpen.value = false;
   await nextTick();
   const nextVideo = videoRef.value;
   if (!nextVideo) return;
@@ -958,11 +982,11 @@ async function handleContextAction(action) {
 
 onMounted(async () => {
   await bootstrapAuth();
-  window.addEventListener("click", closeMenu);
+  window.addEventListener("click", closeFloatingMenus);
 });
 
 onBeforeUnmount(() => {
-  window.removeEventListener("click", closeMenu);
+  window.removeEventListener("click", closeFloatingMenus);
 });
 </script>
 
@@ -1212,13 +1236,6 @@ onBeforeUnmount(() => {
             </div>
 
             <div v-if="isVideoAsset(selectedAsset)" class="player">
-              <div class="player-toolbar">
-                <label for="video-quality">清晰度</label>
-                <select id="video-quality" v-model="videoQuality" class="quality-select" @change="onVideoQualityChange">
-                  <option value="1080p">1080p</option>
-                  <option value="original">原画</option>
-                </select>
-              </div>
               <video
                 :key="detailStreamSrc()"
                 ref="videoRef"
@@ -1228,6 +1245,31 @@ onBeforeUnmount(() => {
                 @pause="onVideoPause"
                 @play="onVideoPlay"
               ></video>
+              <div class="quality-menu" @click.stop>
+                <button
+                  class="quality-trigger"
+                  :class="{ active: videoQualityMenuOpen }"
+                  type="button"
+                  :aria-expanded="videoQualityMenuOpen"
+                  aria-label="选择清晰度"
+                  @click="videoQualityMenuOpen = !videoQualityMenuOpen"
+                >
+                  <span>{{ selectedVideoQualityLabel() }}</span>
+                  <strong>⋮</strong>
+                </button>
+                <div v-if="videoQualityMenuOpen" class="quality-popover">
+                  <button
+                    v-for="item in videoQualityOptions"
+                    :key="item.value"
+                    type="button"
+                    :class="{ active: videoQuality === item.value }"
+                    @click="changeVideoQuality(item.value)"
+                  >
+                    <span>{{ item.label }}</span>
+                    <small>{{ item.hint }}</small>
+                  </button>
+                </div>
+              </div>
             </div>
             <div v-else class="file-preview">
               <strong>{{ isArchiveAsset(selectedAsset) ? "压缩包" : "文件" }}</strong>
@@ -1497,8 +1539,16 @@ label {
 .project-item {
   display: flex;
   justify-content: space-between;
+  gap: 10px;
   padding: 10px 11px;
   text-align: left;
+}
+
+.project-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .project-item.active {
@@ -1530,6 +1580,7 @@ h1 {
 .top-actions {
   gap: 8px;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .access-badge {
@@ -1597,6 +1648,7 @@ h1 {
   color: #334155;
   background: #fff;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .btn.primary {
@@ -1830,6 +1882,7 @@ h1 {
 
 .admin-head {
   justify-content: space-between;
+  gap: 10px;
   margin-bottom: 14px;
 }
 
@@ -1927,6 +1980,7 @@ h1 {
   padding: 5px 9px;
   font-size: 12px;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .mini-action.danger {
@@ -1998,6 +2052,7 @@ h1 {
   margin-bottom: 14px;
   padding: 0;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .detail-title {
@@ -2018,30 +2073,11 @@ h1 {
 }
 
 .player {
+  position: relative;
   border: 1px solid #dce5f0;
   border-radius: 14px;
   overflow: hidden;
   background: #0f172a;
-}
-
-.player-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 10px 12px;
-  color: #cbd5e1;
-  font-size: 13px;
-}
-
-.quality-select {
-  height: 32px;
-  border: 1px solid #334155;
-  border-radius: 8px;
-  background: #111827;
-  color: #f8fafc;
-  padding: 0 28px 0 10px;
-  font: inherit;
 }
 
 .video {
@@ -2050,6 +2086,82 @@ h1 {
   aspect-ratio: 16/9;
   max-height: 70vh;
   object-fit: contain;
+}
+
+.quality-menu {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 8;
+}
+
+.quality-trigger {
+  min-width: 82px;
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.82);
+  color: #f8fafc;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 10px 0 12px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(8px);
+}
+
+.quality-trigger.active,
+.quality-trigger:hover {
+  background: rgba(30, 41, 59, 0.94);
+}
+
+.quality-trigger strong {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.quality-popover {
+  position: absolute;
+  right: 0;
+  bottom: 44px;
+  width: 148px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.96);
+  padding: 6px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+}
+
+.quality-popover button {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+  cursor: pointer;
+  text-align: left;
+  font-weight: 900;
+}
+
+.quality-popover button.active,
+.quality-popover button:hover {
+  background: #2563eb;
+  color: #fff;
+}
+
+.quality-popover small {
+  color: inherit;
+  opacity: 0.72;
+  font-size: 11px;
 }
 
 .file-preview {
@@ -2244,11 +2356,58 @@ h1 {
     min-height: auto;
     border-right: 0;
     border-bottom: 1px solid #e2e8f0;
+    padding: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 20;
   }
 
-  .topbar,
+  .brand {
+    margin-bottom: 10px;
+  }
+
+  .brand strong {
+    font-size: 18px;
+    white-space: nowrap;
+  }
+
+  .new-project {
+    width: 100%;
+  }
+
+  .project-list {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .project-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .project-item {
+    flex: 0 0 auto;
+    min-width: 132px;
+    max-width: 220px;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+  }
+
+  .topbar {
+    align-items: flex-start;
+  }
+
+  .topbar h1 {
+    max-width: 48vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .detail-title {
-    flex-direction: column;
     align-items: flex-start;
   }
 
@@ -2263,6 +2422,10 @@ h1 {
   .admin-user-title {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .admin-user-metrics {
+    justify-content: flex-start;
   }
 
   .admin-table,
@@ -2305,14 +2468,65 @@ h1 {
     padding: 14px 12px;
   }
 
+  h1 {
+    font-size: 22px;
+  }
+
+  .topbar {
+    gap: 10px;
+  }
+
+  .topbar h1 {
+    max-width: 100%;
+  }
+
   .top-actions {
     width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
   }
 
   .top-actions .btn,
   .access-badge {
-    flex: 1;
+    width: 100%;
     text-align: center;
+  }
+
+  .access-badge {
+    grid-column: 1 / -1;
+  }
+
+  .upload-toast {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+
+  .canvas {
+    min-height: calc(100vh - 260px);
+    padding: 12px;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .asset-card {
+    display: grid;
+    grid-template-columns: 108px 1fr;
+    min-height: 88px;
+  }
+
+  .thumb {
+    height: 100%;
+    min-height: 88px;
+  }
+
+  .card-body {
+    min-width: 0;
+    display: grid;
+    align-content: center;
   }
 
   .library,
@@ -2322,12 +2536,23 @@ h1 {
   }
 
   .admin-stats {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .admin-stats div {
+    padding: 11px;
+  }
+
+  .admin-stats strong {
+    font-size: 18px;
   }
 
   .admin-head {
     align-items: stretch;
     gap: 8px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
   }
 
   .admin-head .btn,
@@ -2338,12 +2563,39 @@ h1 {
 
   .detail-actions {
     width: 100%;
-    justify-content: stretch;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
   }
 
   .detail-actions .btn {
-    flex: 1;
+    min-width: 0;
     text-align: center;
+  }
+
+  .detail-title h2 {
+    font-size: 20px;
+    line-height: 1.2;
+    word-break: break-word;
+  }
+
+  .quality-menu {
+    right: 8px;
+    bottom: 8px;
+  }
+
+  .quality-trigger {
+    min-width: 72px;
+    height: 32px;
+  }
+
+  .quality-popover {
+    bottom: 38px;
+  }
+
+  .note-head {
+    align-items: flex-start;
+    gap: 8px;
+    flex-direction: column;
   }
 
   .menu-backdrop {

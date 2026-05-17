@@ -9,7 +9,8 @@ RUN --mount=type=cache,target=/root/.m2 \
 
 FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
-RUN mkdir -p /app/storage
+RUN apk add --no-cache ffmpeg \
+    && mkdir -p /app/storage
 COPY --from=builder /app/target/review-platform-0.0.1-SNAPSHOT.jar /app/review-server.jar
 
 EXPOSE 8080
