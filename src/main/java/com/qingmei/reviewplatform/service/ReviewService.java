@@ -8,6 +8,8 @@ import com.qingmei.reviewplatform.model.ReviewTask;
 import com.qingmei.reviewplatform.model.ShareLink;
 import com.qingmei.reviewplatform.model.UserAccount;
 import com.qingmei.reviewplatform.repository.ReviewRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +33,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class ReviewService {
+
+    private static final Logger log = LoggerFactory.getLogger(ReviewService.class);
 
     public static final String QUEUE_REVIEW_JOBS = "review:jobs";
 
@@ -292,11 +296,14 @@ public class ReviewService {
         CompletableFuture.runAsync(() -> {
             try {
                 if (!Files.exists(target)) {
+                    log.info("start 1080p transcode, assetId={}, source={}, target={}", asset.getId(), asset.getStoragePath(), target);
                     transcode1080p(Path.of(asset.getStoragePath()), target);
                 }
                 failedTranscodes.remove(key);
-            } catch (Exception ignored) {
+                log.info("finish 1080p transcode, assetId={}, target={}", asset.getId(), target);
+            } catch (Exception ex) {
                 failedTranscodes.add(key);
+                log.warn("1080p transcode failed, assetId={}, source={}, target={}", asset.getId(), asset.getStoragePath(), target, ex);
             } finally {
                 transcodeLocks.remove(key, lock);
             }
@@ -305,7 +312,7 @@ public class ReviewService {
 
     private void transcode1080p(Path source, Path target) throws IOException, InterruptedException {
         Files.createDirectories(target.getParent());
-        Path temp = target.resolveSibling(target.getFileName() + ".tmp");
+        Path temp = target.resolveSibling(target.getFileName() + ".tmp.mp4");
         Files.deleteIfExists(temp);
 
         Process process = new ProcessBuilder(
