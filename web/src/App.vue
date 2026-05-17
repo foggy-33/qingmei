@@ -85,6 +85,7 @@ const dragging = ref(false);
 const fileInput = ref(null);
 const selectedKeys = ref([]);
 const menu = ref({ visible: false, x: 0, y: 0, type: "blank", key: "" });
+const accountMenuOpen = ref(false);
 const videoQualityOptions = [
   { value: "1080p", label: "1080p", hint: "高清" },
   { value: "original", label: "原画", hint: "原始码率" }
@@ -613,6 +614,7 @@ function closeMenu() {
 function closeFloatingMenus() {
   closeMenu();
   videoQualityMenuOpen.value = false;
+  accountMenuOpen.value = false;
 }
 
 function renameAsset(id) {
@@ -1095,7 +1097,13 @@ onBeforeUnmount(() => {
       <div class="brand">
         <div>
           <strong>青媒审片台</strong>
-          <span class="user-name">{{ currentUser.username }}</span>
+          <button class="account-trigger" type="button" @click.stop="accountMenuOpen = !accountMenuOpen">
+            <span class="user-name">{{ currentUser.username }}</span>
+            <span class="account-caret">⌄</span>
+          </button>
+          <div v-if="accountMenuOpen" class="account-menu" @click.stop>
+            <button type="button" @click="onLogout">退出登录</button>
+          </div>
         </div>
       </div>
 
@@ -1132,7 +1140,6 @@ onBeforeUnmount(() => {
             <small>{{ uploadProgress.name }}</small>
             <button v-if="uploading" @click="onCancelUpload">取消</button>
           </div>
-          <button class="btn ghost logout top-logout" @click="onLogout">退出登录</button>
         </div>
       </header>
 
@@ -1594,6 +1601,7 @@ label {
 
 .brand {
   margin-bottom: 22px;
+  position: relative;
 }
 
 .brand strong {
@@ -1604,25 +1612,70 @@ label {
   font-weight: 900;
 }
 
-.brand span {
-  display: block;
-  margin-top: 8px;
-}
-
 .brand .user-name {
   color: #1d4ed8;
   font-size: 15px;
   font-weight: 900;
 }
 
+.account-trigger {
+  margin-top: 8px;
+  border: 0;
+  border-radius: 999px;
+  background: #eef5ff;
+  color: #1d4ed8;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.account-caret {
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.account-menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% - 10px);
+  z-index: 35;
+  min-width: 128px;
+  border: 1px solid #dbe3ee;
+  border-radius: 12px;
+  background: #fff;
+  padding: 6px;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.14);
+}
+
+.account-menu button {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #dc2626;
+  cursor: pointer;
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 800;
+}
+
+.account-menu button:hover {
+  background: #fef2f2;
+}
+
 .new-project {
   border: 1px solid #d8e1ed;
-  border-radius: 10px;
-  background: #f8fafc;
-  color: #2563eb;
-  padding: 10px 12px;
+  border-radius: 12px;
+  background: #2563eb;
+  color: #fff;
+  padding: 11px 13px;
   cursor: pointer;
-  font-weight: 800;
+  font-weight: 900;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.18);
 }
 
 .project-list {
@@ -1657,10 +1710,6 @@ label {
 .project-item.active {
   background: #eef5ff;
   color: #1d4ed8;
-}
-
-.top-logout {
-  color: #64748b;
 }
 
 .main {
@@ -2557,14 +2606,19 @@ h1 {
     min-height: auto;
     border-right: 0;
     border-bottom: 1px solid #e2e8f0;
-    padding: 12px;
+    padding: 12px 12px 10px;
     position: sticky;
     top: 0;
     z-index: 20;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 12px;
+    align-items: start;
   }
 
   .brand {
-    margin-bottom: 10px;
+    margin-bottom: 0;
+    min-width: 0;
   }
 
   .brand strong {
@@ -2572,16 +2626,30 @@ h1 {
     white-space: nowrap;
   }
 
+  .account-trigger {
+    margin-top: 6px;
+    padding: 5px 9px;
+  }
+
+  .account-menu {
+    top: calc(100% + 4px);
+  }
+
   .new-project {
-    width: 100%;
+    min-width: 96px;
+    height: 38px;
+    padding: 0 12px;
+    border-radius: 999px;
+    align-self: center;
   }
 
   .project-list {
+    grid-column: 1 / -1;
     display: flex;
     gap: 8px;
-    margin-top: 10px;
+    margin-top: 0;
     overflow-x: auto;
-    padding-bottom: 2px;
+    padding: 2px 0 1px;
     scrollbar-width: none;
   }
 
@@ -2591,10 +2659,13 @@ h1 {
 
   .project-item {
     flex: 0 0 auto;
-    min-width: 132px;
+    min-width: 118px;
     max-width: 220px;
     border: 1px solid #e2e8f0;
     background: #fff;
+    border-radius: 999px;
+    padding: 8px 10px;
+    align-items: center;
   }
 
   .topbar {
@@ -2665,19 +2736,60 @@ h1 {
 }
 
 @media (max-width: 640px) {
+  .sidebar {
+    padding: 10px;
+    gap: 8px 10px;
+  }
+
+  .brand strong {
+    font-size: 17px;
+  }
+
+  .brand .user-name {
+    max-width: 44vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+  }
+
+  .account-trigger {
+    max-width: 52vw;
+    padding: 4px 8px;
+  }
+
+  .new-project {
+    min-width: 88px;
+    height: 34px;
+    font-size: 13px;
+    box-shadow: none;
+  }
+
+  .project-item {
+    min-width: 104px;
+    max-width: 168px;
+    padding: 7px 9px;
+    font-size: 13px;
+  }
+
+  .project-item small {
+    font-size: 11px;
+  }
+
   .main {
-    padding: 14px 12px;
+    padding: 12px;
   }
 
   h1 {
-    font-size: 22px;
+    font-size: 20px;
   }
 
   .topbar {
-    gap: 10px;
+    gap: 8px;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: start;
+    margin-bottom: 10px;
   }
 
   .topbar h1 {
@@ -2686,8 +2798,8 @@ h1 {
 
   .top-actions {
     width: auto;
-    display: grid;
-    grid-template-columns: auto auto;
+    display: flex;
+    flex-wrap: wrap;
     gap: 6px;
     justify-content: end;
     align-items: start;
@@ -2700,24 +2812,16 @@ h1 {
   }
 
   .access-badge {
-    grid-column: auto;
-    padding: 5px 8px;
-    font-size: 11px;
-    line-height: 1.1;
-  }
-
-  .top-logout {
-    padding: 5px 8px;
-    border-radius: 999px;
-    font-size: 11px;
+    padding: 4px 7px;
+    font-size: 10px;
     line-height: 1.1;
   }
 
   .admin-entry {
-    grid-column: 1 / -1;
-    justify-self: stretch;
-    padding: 7px 10px;
-    font-size: 12px;
+    padding: 5px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 1.1;
   }
 
   .upload-toast {
