@@ -56,9 +56,15 @@ const view = ref("home");
 const selectedAssetId = ref("");
 const noteText = ref("");
 const replyDrafts = ref({});
+const playerRef = ref(null);
 const videoRef = ref(null);
 const videoQuality = ref("1080p");
 const videoQualityMenuOpen = ref(false);
+const videoPlaying = ref(false);
+const videoCurrentTime = ref(0);
+const videoDuration = ref(0);
+const videoMuted = ref(false);
+const videoVolume = ref(1);
 const pausedAtSec = ref(null);
 const pauseDetected = ref(false);
 const shareLinks = ref({});
@@ -688,6 +694,63 @@ function selectedVideoQualityLabel() {
   return videoQualityOptions.find((item) => item.value === videoQuality.value)?.label || "1080p";
 }
 
+const videoProgressPercent = computed(() => {
+  if (!videoDuration.value) return 0;
+  return Math.min(100, Math.max(0, (videoCurrentTime.value / videoDuration.value) * 100));
+});
+
+function syncVideoState() {
+  const video = videoRef.value;
+  if (!video) return;
+  videoCurrentTime.value = Number(video.currentTime || 0);
+  videoDuration.value = Number.isFinite(video.duration) ? Number(video.duration || 0) : 0;
+  videoPlaying.value = !video.paused && !video.ended;
+  videoMuted.value = video.muted;
+  videoVolume.value = Number(video.volume ?? 1);
+}
+
+function toggleVideoPlay() {
+  const video = videoRef.value;
+  if (!video) return;
+  if (video.paused || video.ended) {
+    video.play().catch(() => {});
+  } else {
+    video.pause();
+  }
+}
+
+function seekVideo(event) {
+  const video = videoRef.value;
+  if (!video || !videoDuration.value) return;
+  video.currentTime = Number(event.target.value || 0);
+  syncVideoState();
+}
+
+function toggleVideoMute() {
+  const video = videoRef.value;
+  if (!video) return;
+  video.muted = !video.muted;
+  syncVideoState();
+}
+
+function changeVideoVolume(event) {
+  const video = videoRef.value;
+  if (!video) return;
+  video.volume = Math.min(1, Math.max(0, Number(event.target.value || 0)));
+  video.muted = video.volume === 0;
+  syncVideoState();
+}
+
+function toggleVideoFullscreen() {
+  const player = playerRef.value;
+  if (!player) return;
+  if (document.fullscreenElement) {
+    document.exitFullscreen?.();
+  } else {
+    player.requestFullscreen?.();
+  }
+}
+
 async function changeVideoQuality(quality) {
   if (quality === videoQuality.value) {
     videoQualityMenuOpen.value = false;
@@ -944,10 +1007,12 @@ function onVideoPause() {
   if (!videoRef.value) return;
   pausedAtSec.value = Number(videoRef.value.currentTime || 0);
   pauseDetected.value = true;
+  syncVideoState();
 }
 
 function onVideoPlay() {
   pauseDetected.value = false;
+  syncVideoState();
 }
 
 function seekTo(timeSec) {
@@ -1059,7 +1124,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="top-actions">
           <span class="access-badge">{{ accessLabel }}</span>
-          <button v-if="isAdmin" class="btn ghost" @click="openAdmin">管理后台</button>
+          <button v-if="isAdmin && view !== 'admin'" class="btn ghost admin-entry" @click="openAdmin">管理后台</button>
           <input ref="fileInput" type="file" class="hidden" @change="onPickFile" />
           <div v-if="uploadProgress.visible" class="upload-toast">
             <strong>{{ uploadProgress.percent }}%</strong>
@@ -1067,7 +1132,6 @@ onBeforeUnmount(() => {
             <small>{{ uploadProgress.name }}</small>
             <button v-if="uploading" @click="onCancelUpload">取消</button>
           </div>
-          <button class="btn ghost" @click="loadAssets">刷新</button>
           <button class="btn ghost logout top-logout" @click="onLogout">退出登录</button>
         </div>
       </header>
@@ -1077,8 +1141,7 @@ onBeforeUnmount(() => {
       <template v-if="view === 'admin'">
         <section class="admin-panel">
           <div class="admin-head">
-            <button class="back" @click="view = 'home'">返回素材库</button>
-            <button class="btn ghost" @click="loadAdminOverview">刷新后台</button>
+            <button class="back" @click="view = 'home'">返回</button>
           </div>
 
           <div v-if="adminLoading" class="empty">加载中...</div>
@@ -1218,7 +1281,7 @@ onBeforeUnmount(() => {
       <template v-else>
         <section class="detail">
           <button class="back" @click="adminPreviewAsset ? (adminPreviewAsset = null, view = 'admin') : (view = 'home')">
-            {{ adminPreviewAsset ? "返回管理后台" : "返回素材库" }}
+            返回
           </button>
           <div v-if="selectedAsset">
             <div class="detail-title">
@@ -1235,39 +1298,79 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div v-if="isVideoAsset(selectedAsset)" class="player">
+            <div v-if="isVideoAsset(selectedAsset)" ref="playerRef" class="player">
               <video
                 :key="detailStreamSrc()"
                 ref="videoRef"
-                controls
                 class="video"
                 :src="detailStreamSrc()"
+                playsinline
+                @click="toggleVideoPlay"
+                @dblclick="toggleVideoFullscreen"
+                @loadedmetadata="syncVideoState"
+                @timeupdate="syncVideoState"
+                @volumechange="syncVideoState"
                 @pause="onVideoPause"
                 @play="onVideoPlay"
               ></video>
-              <div class="quality-menu" @click.stop>
-                <button
-                  class="quality-trigger"
-                  :class="{ active: videoQualityMenuOpen }"
-                  type="button"
-                  :aria-expanded="videoQualityMenuOpen"
-                  aria-label="选择清晰度"
-                  @click="videoQualityMenuOpen = !videoQualityMenuOpen"
-                >
-                  <span>{{ selectedVideoQualityLabel() }}</span>
-                  <strong>⋮</strong>
-                </button>
-                <div v-if="videoQualityMenuOpen" class="quality-popover">
-                  <button
-                    v-for="item in videoQualityOptions"
-                    :key="item.value"
-                    type="button"
-                    :class="{ active: videoQuality === item.value }"
-                    @click="changeVideoQuality(item.value)"
-                  >
-                    <span>{{ item.label }}</span>
-                    <small>{{ item.hint }}</small>
+              <div class="player-shade" @click="toggleVideoPlay"></div>
+              <div class="player-controls" @click.stop>
+                <input
+                  class="seek"
+                  type="range"
+                  min="0"
+                  :max="videoDuration || 0"
+                  step="0.1"
+                  :value="videoCurrentTime"
+                  :style="{ '--progress': `${videoProgressPercent}%` }"
+                  aria-label="播放进度"
+                  @input="seekVideo"
+                />
+                <div class="control-row">
+                  <button class="control-btn play-btn" type="button" aria-label="播放或暂停" @click="toggleVideoPlay">
+                    {{ videoPlaying ? "Ⅱ" : "▶" }}
                   </button>
+                  <span class="time-readout">{{ formatTimeLabel(videoCurrentTime) }} / {{ formatTimeLabel(videoDuration) }}</span>
+                  <div class="control-spacer"></div>
+                  <button class="control-btn volume-btn" type="button" aria-label="静音" @click="toggleVideoMute">
+                    {{ videoMuted || videoVolume === 0 ? "静" : "音" }}
+                  </button>
+                  <input
+                    class="volume-range"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    :value="videoMuted ? 0 : videoVolume"
+                    aria-label="音量"
+                    @input="changeVideoVolume"
+                  />
+                  <button class="control-btn fullscreen-btn" type="button" aria-label="全屏" @click="toggleVideoFullscreen">⛶</button>
+                  <div class="player-quality-menu">
+                    <button
+                      class="quality-trigger"
+                      :class="{ active: videoQualityMenuOpen }"
+                      type="button"
+                      :aria-expanded="videoQualityMenuOpen"
+                      aria-label="选择清晰度"
+                      @click="videoQualityMenuOpen = !videoQualityMenuOpen"
+                    >
+                      <span>{{ selectedVideoQualityLabel() }}</span>
+                      <strong>⋮</strong>
+                    </button>
+                    <div v-if="videoQualityMenuOpen" class="quality-popover">
+                      <button
+                        v-for="item in videoQualityOptions"
+                        :key="item.value"
+                        type="button"
+                        :class="{ active: videoQuality === item.value }"
+                        @click="changeVideoQuality(item.value)"
+                      >
+                        <span>{{ item.label }}</span>
+                        <small>{{ item.hint }}</small>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1583,6 +1686,10 @@ h1 {
   justify-content: flex-end;
 }
 
+.admin-entry {
+  order: 3;
+}
+
 .access-badge {
   border: 1px solid #cbd5e1;
   border-radius: 999px;
@@ -1591,6 +1698,7 @@ h1 {
   padding: 7px 11px;
   font-size: 12px;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .upload-toast {
@@ -1881,7 +1989,7 @@ h1 {
 }
 
 .admin-head {
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 10px;
   margin-bottom: 14px;
 }
@@ -2078,6 +2186,7 @@ h1 {
   border-radius: 14px;
   overflow: hidden;
   background: #0f172a;
+  user-select: none;
 }
 
 .video {
@@ -2088,11 +2197,91 @@ h1 {
   object-fit: contain;
 }
 
-.quality-menu {
+.player-shade {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
+  inset: auto 0 0;
+  height: 42%;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0));
+  pointer-events: none;
+}
+
+.player-controls {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: 8;
+  padding: 0 16px 14px;
+  color: #f8fafc;
+}
+
+.seek {
+  width: 100%;
+  height: 18px;
+  margin: 0 0 7px;
+  accent-color: #f8fafc;
+  cursor: pointer;
+  background: transparent;
+}
+
+.seek::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(to right, #fff var(--progress), rgba(255, 255, 255, 0.32) var(--progress));
+}
+
+.seek::-webkit-slider-thumb {
+  margin-top: -5px;
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.control-spacer {
+  flex: 1;
+}
+
+.control-btn {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #f8fafc;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.control-btn:hover,
+.control-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.play-btn {
+  font-size: 18px;
+}
+
+.time-readout {
+  min-width: 96px;
+  color: rgba(248, 250, 252, 0.9);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.volume-range {
+  width: 78px;
+  accent-color: #f8fafc;
+}
+
+.player-quality-menu {
+  position: relative;
 }
 
 .quality-trigger {
@@ -2162,6 +2351,18 @@ h1 {
   color: inherit;
   opacity: 0.72;
   font-size: 11px;
+}
+
+.player:fullscreen {
+  border: 0;
+  border-radius: 0;
+}
+
+.player:fullscreen .video {
+  width: 100vw;
+  height: 100vh;
+  max-height: none;
+  aspect-ratio: auto;
 }
 
 .file-preview {
@@ -2474,6 +2675,9 @@ h1 {
 
   .topbar {
     gap: 10px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
   }
 
   .topbar h1 {
@@ -2481,20 +2685,39 @@ h1 {
   }
 
   .top-actions {
-    width: 100%;
+    width: auto;
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
+    grid-template-columns: auto auto;
+    gap: 6px;
+    justify-content: end;
+    align-items: start;
   }
 
   .top-actions .btn,
   .access-badge {
-    width: 100%;
+    width: auto;
     text-align: center;
   }
 
   .access-badge {
+    grid-column: auto;
+    padding: 5px 8px;
+    font-size: 11px;
+    line-height: 1.1;
+  }
+
+  .top-logout {
+    padding: 5px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 1.1;
+  }
+
+  .admin-entry {
     grid-column: 1 / -1;
+    justify-self: stretch;
+    padding: 7px 10px;
+    font-size: 12px;
   }
 
   .upload-toast {
@@ -2549,16 +2772,13 @@ h1 {
   }
 
   .admin-head {
-    align-items: stretch;
-    gap: 8px;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    align-items: flex-start;
+    display: flex;
   }
 
-  .admin-head .btn,
   .admin-head .back {
-    width: 100%;
-    text-align: center;
+    width: auto;
+    text-align: left;
   }
 
   .detail-actions {
@@ -2578,9 +2798,21 @@ h1 {
     word-break: break-word;
   }
 
-  .quality-menu {
-    right: 8px;
-    bottom: 8px;
+  .player-controls {
+    padding: 0 10px 10px;
+  }
+
+  .control-row {
+    gap: 6px;
+  }
+
+  .time-readout {
+    min-width: 72px;
+    font-size: 11px;
+  }
+
+  .volume-range {
+    display: none;
   }
 
   .quality-trigger {
