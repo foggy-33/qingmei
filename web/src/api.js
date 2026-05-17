@@ -198,14 +198,14 @@ export async function logoutUser() {
   }
 }
 
-export function streamUrl(assetId) {
-  const token = encodeURIComponent(getAuthToken());
-  return `${API_BASE}/api/v1/assets/${assetId}/stream?access_token=${token}`;
+export function streamUrl(assetId, quality = "original") {
+  const token = getAuthToken();
+  return `${API_BASE}/api/v1/assets/${assetId}/stream?${qs({ quality, access_token: token })}`;
 }
 
-export function adminStreamUrl(assetId) {
-  const token = encodeURIComponent(getAuthToken());
-  return `${API_BASE}/api/v1/admin/assets/${assetId}/stream?access_token=${token}`;
+export function adminStreamUrl(assetId, quality = "original") {
+  const token = getAuthToken();
+  return `${API_BASE}/api/v1/admin/assets/${assetId}/stream?${qs({ quality, access_token: token })}`;
 }
 
 export function adminDownloadUrl(assetId) {
@@ -218,8 +218,8 @@ export function downloadUrl(assetId) {
   return `${API_BASE}/api/v1/assets/${assetId}/download?access_token=${token}`;
 }
 
-export function shareStreamUrl(token) {
-  return `${API_BASE}/s/${encodeURIComponent(token)}`;
+export function shareStreamUrl(token, quality = "original") {
+  return `${API_BASE}/s/${encodeURIComponent(token)}?${qs({ quality })}`;
 }
 
 export function shareDownloadUrl(token) {

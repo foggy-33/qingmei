@@ -15,13 +15,18 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -33,6 +38,8 @@ public class ReviewService {
     private final ReviewRepository repository;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
+    private final ConcurrentMap<String, Object> transcodeLocks = new ConcurrentHashMap<>();
+    private final Set<String> failedTranscodes = ConcurrentHashMap.newKeySet();
 
     public ReviewService(AppProperties appProperties, ReviewRepository repository, StringRedisTemplate redisTemplate, ObjectMapper objectMapper) {
         this.appProperties = appProperties;
@@ -63,6 +70,7 @@ public class ReviewService {
         repository.createReviewTask(task);
 
         redisTemplate.opsForList().leftPush(QUEUE_REVIEW_JOBS, asset.getId());
+        scheduleVideoTranscode(asset);
         return asset;
     }
 
@@ -105,6 +113,24 @@ public class ReviewService {
             Files.deleteIfExists(Path.of(asset.getStoragePath()));
         } catch (IOException ignored) {
         }
+        deleteVideoVariants(assetId);
+    }
+
+    public record PlaybackFile(Path path, String mimeType) {
+    }
+
+    public PlaybackFile playbackFile(Asset asset, String quality) {
+        if (!isVideo(asset) || !"1080p".equals(quality)) {
+            return new PlaybackFile(Path.of(asset.getStoragePath()), asset.getMimeType());
+        }
+
+        Path variantPath = videoVariantPath(asset.getId(), "1080p");
+        if (Files.exists(variantPath)) {
+            return new PlaybackFile(variantPath, "video/mp4");
+        }
+
+        scheduleVideoTranscode(asset);
+        return new PlaybackFile(Path.of(asset.getStoragePath()), asset.getMimeType());
     }
 
     public record ShareResult(ShareLink share, String fullLink) {
@@ -164,6 +190,7 @@ public class ReviewService {
     public void ensureStorageReady() {
         try {
             Files.createDirectories(Path.of(appProperties.getStorageDir()));
+            Files.createDirectories(videoVariantsDir());
         } catch (IOException ex) {
             throw new IllegalStateException("init storage failed", ex);
         }
@@ -232,5 +259,94 @@ public class ReviewService {
 
     private boolean isVideo(Asset asset) {
         return String.valueOf(asset.getMimeType()).startsWith("video/");
+    }
+
+    private Path videoVariantsDir() {
+        return Path.of(appProperties.getStorageDir()).resolve("variants");
+    }
+
+    private Path videoVariantPath(String assetId, String quality) {
+        return videoVariantsDir().resolve(assetId).resolve(quality + ".mp4");
+    }
+
+    private void scheduleVideoTranscode(Asset asset) {
+        if (!isVideo(asset)) {
+            return;
+        }
+
+        Path target = videoVariantPath(asset.getId(), "1080p");
+        if (Files.exists(target)) {
+            return;
+        }
+
+        String key = asset.getId() + ":1080p";
+        if (failedTranscodes.contains(key)) {
+            return;
+        }
+
+        Object lock = new Object();
+        if (transcodeLocks.putIfAbsent(key, lock) != null) {
+            return;
+        }
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                if (!Files.exists(target)) {
+                    transcode1080p(Path.of(asset.getStoragePath()), target);
+                }
+                failedTranscodes.remove(key);
+            } catch (Exception ignored) {
+                failedTranscodes.add(key);
+            } finally {
+                transcodeLocks.remove(key, lock);
+            }
+        });
+    }
+
+    private void transcode1080p(Path source, Path target) throws IOException, InterruptedException {
+        Files.createDirectories(target.getParent());
+        Path temp = target.resolveSibling(target.getFileName() + ".tmp");
+        Files.deleteIfExists(temp);
+
+        Process process = new ProcessBuilder(
+                "ffmpeg",
+                "-y",
+                "-i", source.toString(),
+                "-vf", "scale=-2:min(1080\\,ih)",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "23",
+                "-maxrate", "5000k",
+                "-bufsize", "10000k",
+                "-c:a", "aac",
+                "-b:a", "160k",
+                "-movflags", "+faststart",
+                temp.toString()
+        ).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+
+        int code = process.waitFor();
+        if (code != 0 || !Files.exists(temp)) {
+            Files.deleteIfExists(temp);
+            throw new IOException("ffmpeg transcode failed");
+        }
+        Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    private void deleteVideoVariants(String assetId) {
+        Path dir = videoVariantsDir().resolve(assetId);
+        try {
+            if (!Files.exists(dir)) {
+                return;
+            }
+            try (var stream = Files.walk(dir)) {
+                stream.sorted((a, b) -> b.compareTo(a)).forEach(path -> {
+                    try {
+                        Files.deleteIfExists(path);
+                    } catch (IOException ignored) {
+                    }
+                });
+            }
+        } catch (IOException ignored) {
+        }
     }
 }

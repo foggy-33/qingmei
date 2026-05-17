@@ -121,10 +121,12 @@ public class ApiController {
     }
 
     @GetMapping("/api/v1/assets/{id}/stream")
-    public ResponseEntity<?> streamAsset(HttpServletRequest request, @PathVariable String id) {
+    public ResponseEntity<?> streamAsset(HttpServletRequest request,
+                                         @PathVariable String id,
+                                         @RequestParam(defaultValue = "original") String quality) {
         try {
             Asset asset = reviewService.getAsset(id, currentUsername(request));
-            return fileResponse(asset, false);
+            return playbackResponse(asset, quality);
         } catch (NotFoundException ex) {
             return error(HttpStatus.NOT_FOUND, "asset not found");
         } catch (Exception ex) {
@@ -166,10 +168,11 @@ public class ApiController {
     }
 
     @GetMapping("/s/{token}")
-    public ResponseEntity<?> openShare(@PathVariable String token) {
+    public ResponseEntity<?> openShare(@PathVariable String token,
+                                       @RequestParam(defaultValue = "original") String quality) {
         try {
             Asset asset = reviewService.resolveShare(token);
-            return fileResponse(asset, false);
+            return playbackResponse(asset, quality);
         } catch (ExpiredShareException ex) {
             return ResponseEntity.status(HttpStatus.GONE).body(Map.of("error", "share link expired"));
         } catch (NotFoundException ex) {
@@ -247,14 +250,16 @@ public class ApiController {
     }
 
     @GetMapping("/api/v1/admin/assets/{id}/stream")
-    public ResponseEntity<?> streamAdminAsset(HttpServletRequest request, @PathVariable String id) {
+    public ResponseEntity<?> streamAdminAsset(HttpServletRequest request,
+                                             @PathVariable String id,
+                                             @RequestParam(defaultValue = "original") String quality) {
         String username = currentUsername(request);
         if (!authService.isAdmin(username)) {
             return error(HttpStatus.FORBIDDEN, "admin only");
         }
         try {
             Asset asset = reviewService.getAssetForAdmin(id);
-            return fileResponse(asset, false);
+            return playbackResponse(asset, quality);
         } catch (NotFoundException ex) {
             return error(HttpStatus.NOT_FOUND, "asset not found");
         } catch (Exception ex) {
@@ -359,14 +364,23 @@ public class ApiController {
     }
 
     private ResponseEntity<Resource> fileResponse(Asset asset, boolean attachment) {
-        FileSystemResource resource = new FileSystemResource(asset.getStoragePath());
+        return fileResponse(Path.of(asset.getStoragePath()), asset.getMimeType(), asset.getStoredName(), asset.getOriginalName(), attachment);
+    }
+
+    private ResponseEntity<Resource> playbackResponse(Asset asset, String quality) {
+        ReviewService.PlaybackFile playbackFile = reviewService.playbackFile(asset, quality);
+        return fileResponse(playbackFile.path(), playbackFile.mimeType(), asset.getStoredName(), asset.getOriginalName(), false);
+    }
+
+    private ResponseEntity<Resource> fileResponse(Path path, String mimeTypeValue, String storedName, String originalName, boolean attachment) {
+        FileSystemResource resource = new FileSystemResource(path);
         if (!resource.exists()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
 
         MediaType mediaType;
         try {
-            mediaType = MediaType.parseMediaType(asset.getMimeType());
+            mediaType = MediaType.parseMediaType(mimeTypeValue);
         } catch (InvalidMediaTypeException ex) {
             mediaType = MediaType.APPLICATION_OCTET_STREAM;
         }
@@ -376,8 +390,8 @@ public class ApiController {
                     .body(resource);
         }
 
-        String fallbackName = asset.getStoredName().replaceAll("[^\\x20-\\x7E]", "_");
-        String encodedName = UriUtils.encode(asset.getOriginalName(), StandardCharsets.UTF_8);
+        String fallbackName = storedName.replaceAll("[^\\x20-\\x7E]", "_");
+        String encodedName = UriUtils.encode(originalName, StandardCharsets.UTF_8);
         String disposition = "attachment; filename=\"" + fallbackName + "\"; filename*=UTF-8''" + encodedName;
 
         return ResponseEntity.ok()

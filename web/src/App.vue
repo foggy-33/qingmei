@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import {
   adminDownloadUrl,
   adminStreamUrl,
@@ -57,6 +57,7 @@ const selectedAssetId = ref("");
 const noteText = ref("");
 const replyDrafts = ref({});
 const videoRef = ref(null);
+const videoQuality = ref("1080p");
 const pausedAtSec = ref(null);
 const pauseDetected = ref(false);
 const shareLinks = ref({});
@@ -202,6 +203,7 @@ async function onLogout() {
   shareToken.value = "";
   sharedAsset.value = null;
   sharedAnnotations.value = [];
+  videoQuality.value = "1080p";
 }
 
 function normalizeAnnotation(note) {
@@ -239,6 +241,7 @@ async function openSharedReview(token) {
     sharedAsset.value = data.asset;
     sharedAnnotations.value = parseAnnotationsJson(data.annotations_json);
     selectedAssetId.value = "";
+    videoQuality.value = "1080p";
     view.value = "detail";
   } catch (err) {
     status.value = err.message || "分享链接加载失败";
@@ -573,6 +576,7 @@ function openAsset(id) {
   sharedAsset.value = null;
   sharedAnnotations.value = [];
   selectedAssetId.value = id;
+  videoQuality.value = "1080p";
   view.value = "detail";
   selectedKeys.value = [];
   pausedAtSec.value = null;
@@ -655,14 +659,39 @@ function openAdminAsset(asset) {
   sharedAnnotations.value = [];
   selectedAssetId.value = "";
   noteText.value = "";
+  videoQuality.value = "1080p";
   view.value = "detail";
   pausedAtSec.value = null;
   pauseDetected.value = false;
 }
 
 function detailStreamSrc() {
-  if (adminPreviewAsset.value) return adminStreamUrl(adminPreviewAsset.value.id);
-  return shareMode.value ? shareStreamUrl(shareToken.value) : streamUrl(selectedAsset.value.id);
+  if (adminPreviewAsset.value) return adminStreamUrl(adminPreviewAsset.value.id, videoQuality.value);
+  return shareMode.value ? shareStreamUrl(shareToken.value, videoQuality.value) : streamUrl(selectedAsset.value.id, videoQuality.value);
+}
+
+async function onVideoQualityChange() {
+  const video = videoRef.value;
+  const time = Number(video?.currentTime || 0);
+  const shouldResume = !!video && !video.paused;
+  await nextTick();
+  const nextVideo = videoRef.value;
+  if (!nextVideo) return;
+
+  const restorePlayback = () => {
+    if (time > 0) {
+      nextVideo.currentTime = time;
+    }
+    if (shouldResume) {
+      nextVideo.play().catch(() => {});
+    }
+  };
+
+  if (nextVideo.readyState >= 1) {
+    restorePlayback();
+  } else {
+    nextVideo.addEventListener("loadedmetadata", restorePlayback, { once: true });
+  }
 }
 
 function detailDownloadHref() {
@@ -1183,7 +1212,15 @@ onBeforeUnmount(() => {
             </div>
 
             <div v-if="isVideoAsset(selectedAsset)" class="player">
+              <div class="player-toolbar">
+                <label for="video-quality">清晰度</label>
+                <select id="video-quality" v-model="videoQuality" class="quality-select" @change="onVideoQualityChange">
+                  <option value="1080p">1080p</option>
+                  <option value="original">原画</option>
+                </select>
+              </div>
               <video
+                :key="detailStreamSrc()"
                 ref="videoRef"
                 controls
                 class="video"
@@ -1985,6 +2022,26 @@ h1 {
   border-radius: 14px;
   overflow: hidden;
   background: #0f172a;
+}
+
+.player-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+  color: #cbd5e1;
+  font-size: 13px;
+}
+
+.quality-select {
+  height: 32px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #111827;
+  color: #f8fafc;
+  padding: 0 28px 0 10px;
+  font: inherit;
 }
 
 .video {
